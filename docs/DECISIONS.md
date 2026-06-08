@@ -597,3 +597,29 @@ features it lacks: a 2nd independent rug source (GoPlus), keyless Twitter identi
 history (prior launches + funding + age), buyer-wallet freshness/sybil tracing, a local-LLM verdict over the
 whole report, and a Jupiter honeypot sell-sim. Verified live on BONK: LP locked 100% · 80 providers · 202
 markets · insider clusters (damp-fawn-possum 2888 wallets / 12.7%) · labeled holders. 190 tests pass.
+
+### ADR-044 — Speed, an honest loader, and a legible three-tier watcher ✅
+**Context (user, all in one pass):** (1) the AI analyst was silently returning the rule-based fallback — it
+reached Ollama at `localhost:11434`, which on macOS resolves to IPv6/the app shim and 502s the httpx client
+(curl masks it by falling back to IPv4); (2) a single analysis took ~50s and the scan log flashed every step
+"OK" in a second, then froze — "everything says OK and makes you wait"; (3) the `risky` face was a dark PNG,
+unreadable in the corner ("you can't even tell it's Doakes"), and the user had asked for a *gif*; (4) too much
+"the watcher" persona TEXT (the report quip + the hero "always watching" caption).
+
+**Decisions:**
+- **LLM reachability:** pin `llm.host` to `http://127.0.0.1:11434` (Python default + `config.example.yaml`).
+  Verified end-to-end: `provider=ollama model=qwen2.5:14b`, summaries cite the real findings, injection resisted.
+- **Performance (`web/osint.py`):** the deployer + N top-buyer Helius enhanced-tx calls (~1+8) used to run
+  one-by-one (~17s+). Launch them concurrently (`create_task` + `asyncio.gather`); the client still staggers
+  request *starts* 120ms but the round-trips overlap. Fresh analysis **~50s → ~13s**.
+- **Honest loader (`app.js`):** the scan log is now driven by the real request — it advances the cheap steps,
+  then PARKS on "AI forensic synthesis" in a pulsing *working* state until the fetch resolves (fast-forwards if
+  it finishes early). The user always sees the live stage, never a frozen all-OK list.
+- **Watcher faces:** three media keyed to the verdict — `rugged.gif` (CRITICAL, the animated surprise reveal),
+  `risky.gif` (DANGER/CAUTION — a clean, brightened close-up Doakes "I'm watching you" carved from a clearer
+  source; replaces the dark PNG), and a calm built-in line-art for SAFE (until a clean face is supplied). The
+  corner is bigger (104×86) and brightened (no more grayscale dulling). Removed ALL watcher persona text: the
+  report quip, the hero tagline, the "always watching" caption — keep the reactive FACE, drop the words.
+
+**Honest note:** ~13s is engine + parallel OSINT + one local-LLM pass; the LLM needs Ollama running (graceful
+rule-fallback if not). Still no paid APIs. 195 tests pass.

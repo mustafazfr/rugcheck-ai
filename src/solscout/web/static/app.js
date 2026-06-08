@@ -52,7 +52,6 @@ function syncUrl(mint) {
   try { history.replaceState(null, "", mint ? `/?mint=${mint}` : "/"); } catch { /* ignore */ }
 }
 window.addEventListener("DOMContentLoaded", () => {
-  setWatcher($("#heroFace"), "safe");  // the watcher idles calm on the hero until a mint is scanned
   const m = new URLSearchParams(location.search).get("mint");
   if (m) { $("#mintInput").value = m; run(m); }
 });
@@ -66,7 +65,9 @@ async function run(mint) {
   $("#report").hidden = true;
   showScanning();
   try {
-    const [res] = await Promise.all([fetch(`/api/check/${mint}`), runScanLog()]);
+    const fetchP = fetch(`/api/check/${mint}`);     // kick off the real work
+    await runScanLog(fetchP);                        // step the log, holding on AI synthesis until it lands
+    const res = await fetchP;
     const data = await res.json();
     $("#scanning").hidden = true;
     if (!res.ok || data.error) {
@@ -86,9 +87,13 @@ async function run(mint) {
 }
 
 /* ---------- scanning state ---------- */
-const SCAN_STEPS = ["resolving mint…", "reading on-chain authorities", "pulling DEX market + liquidity",
-  "mapping holder distribution", "tracing funder clusters", "checking buy/sell flow",
-  "querying RugCheck.xyz", "running AI scam-language scan", "compiling verdict"];
+// Honest about the real pipeline, ordered cheap→slow. The last step (deep wallet + AI work) is where the
+// real time goes, so the log PARKS there in a "working" state until the request actually returns — instead
+// of flashing every step "OK" in a second and then making the user stare at a frozen all-OK list.
+const SCAN_STEPS = ["resolving mint & metadata", "reading on-chain authorities (mint / freeze)",
+  "pulling DEX market + liquidity", "mapping holder distribution", "cross-checking RugCheck + GoPlus",
+  "scanning wash-trading & insider bundles", "tracing deployer + buyer wallets",
+  "AI forensic synthesis over the full report"];
 function showScanning() {
   $("#hero").hidden = true;     // swap the big hero for the focused scan → report flow
   $("#report").hidden = true;
@@ -96,16 +101,35 @@ function showScanning() {
   $("#scanLog").innerHTML = "";
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
-async function runScanLog() {
+function _logStep(log, text, state) {  // state: "working" | "ok"
+  const li = document.createElement("li");
+  if (state === "working") li.classList.add("cur");
+  li.innerHTML = `<span>${esc(text)}</span><span class="stat ${state}">${state === "ok" ? "OK" : "working"}</span>`;
+  log.appendChild(li);
+  return li;
+}
+// Drive the log off the real request: advance through the cheap steps, but never mark the FINAL step done
+// until `donePromise` settles — so the user always sees a live "working" stage explaining the wait.
+async function runScanLog(donePromise) {
   const log = $("#scanLog");
+  log.innerHTML = "";
+  let done = false;
+  Promise.resolve(donePromise).then(() => { done = true; }, () => { done = true; });
   for (let i = 0; i < SCAN_STEPS.length; i++) {
-    const li = document.createElement("li");
-    li.style.animationDelay = "0s";
-    li.innerHTML = `<span>${esc(SCAN_STEPS[i])}</span><span class="ok">OK</span>`;
-    log.appendChild(li);
-    await sleep(95 + Math.random() * 70);
+    const last = i === SCAN_STEPS.length - 1;
+    const li = _logStep(log, SCAN_STEPS[i], "working");
+    const stat = li.querySelector(".stat");
+    const hold = last ? Infinity : (i < 4 ? 360 : 780);   // park on the last step until the work is done
+    let waited = 0;
+    while (!done && waited < hold) { await sleep(110); waited += 110; }
+    li.classList.remove("cur");
+    stat.className = "stat ok"; stat.textContent = "OK";
+    if (done && !last) {                                  // work finished early → fill the rest instantly
+      for (let j = i + 1; j < SCAN_STEPS.length; j++) _logStep(log, SCAN_STEPS[j], "ok");
+      break;
+    }
   }
-  await sleep(180);
+  await sleep(140);
 }
 
 /* ---------- render ---------- */
@@ -274,9 +298,14 @@ function _compact(v) { if (v == null) return "—"; if (v < 1000) return "" + v;
 // Real media first; an SVG silhouette is the fallback if a file is ever missing (404 → onerror swaps it in).
 // currentColor inherits the theme --verdict tint.
 const LEVEL_MOOD = { CRITICAL: "rugged", DANGER: "risky", CAUTION: "risky", SAFE: "safe" };
-// per-face media. `safe` has no file yet (the user is supplying the clean "okay" face) → it renders the calm
-// line-art silhouette below. Drop a `safe.gif`/`safe.png` here and add it to this map to use it.
-const _FACE_FILE = { rugged: "rugged.gif", risky: "risky.png" };
+// per-face media + how long to keep it on screen before it gently fades out (≈2–3 plays of that clip, then a
+// soft CSS opacity fade — not an abrupt cut). `safe` has no file yet (the user is supplying the clean "okay"
+// face) → it renders the calm line-art silhouette below and just stays. Add safe here with a file to use it.
+const _FACE = {
+  rugged: { file: "rugged.gif", holdMs: 12700 },  // 6.34s clip × ~2 plays
+  risky:  { file: "risky.gif",  holdMs: 8300 },   // 2.77s clip × ~3 plays
+};
+const _WATCHER_FADE_MS = 1500;  // must match .watcher-corner transition in styles.css
 const HEAD = "M22 28 Q22 13 40 13 L60 13 Q78 13 78 28 L78 55 Q78 85 50 92 Q22 85 22 55 Z";
 const _FALLBACK_SVG = (mood) =>
   `<svg class="watcher-svg ${mood}" viewBox="0 0 100 100" fill="none" stroke="currentColor" ` +
@@ -288,15 +317,30 @@ const _FALLBACK_SVG = (mood) =>
   `</svg>`;
 function watcherFace(mood) {
   const hostile = (mood === "rugged" || mood === "risky");  // both glare; safe is calm
-  const file = _FACE_FILE[mood];
+  const f = _FACE[mood];
   // no media for this mood (e.g. safe until a clean face is supplied) → render the calm silhouette directly,
   // so there's no broken/404 request. A real file, when present, falls back to the same SVG on load error.
-  if (!file) return _FALLBACK_SVG(hostile ? "glare" : "watch");
+  if (!f) return _FALLBACK_SVG(hostile ? "glare" : "watch");
   const svg = _FALLBACK_SVG(hostile ? "glare" : "watch").replace(/"/g, "&quot;");
-  return `<img class="watcher-gif ${mood}" alt="" src="/static/watcher/${file}" ` +
+  return `<img class="watcher-gif ${mood}" alt="" src="/static/watcher/${f.file}" ` +
     `onerror="this.outerHTML='${svg}'"/>`;
 }
-function setWatcher(el, mood) { if (el) el.innerHTML = watcherFace(mood); }
+// generation token so a fresh scan cancels a pending fade/clear from the previous one
+let _watcherGen = 0;
+function setWatcher(el, mood) {
+  if (!el) return;
+  const gen = ++_watcherGen;
+  el.classList.remove("faded");          // re-show (a new scan revives the corner)
+  el.innerHTML = watcherFace(mood);
+  const f = _FACE[mood];
+  if (!f) return;                        // safe line-art: no auto-fade, it just sits there calmly
+  // after ~2–3 plays, gently fade out; once invisible, drop the gif so it stops looping (spares CPU)
+  setTimeout(() => {
+    if (gen !== _watcherGen) return;     // a newer scan already took over
+    el.classList.add("faded");
+    setTimeout(() => { if (gen === _watcherGen) el.innerHTML = ""; }, _WATCHER_FADE_MS + 80);
+  }, f.holdMs);
+}
 
 function renderMarket(m, flow, overview) {
   if (!m || !Object.keys(m).length) { $("#metrics").innerHTML = `<span class="muted-note">No DEX market found.</span>`; $("#flow").innerHTML = ""; return; }
@@ -373,6 +417,5 @@ function renderAI(ai) {
   const via = ai.model ? `via ${esc(ai.model)}` : (ai.provider === "rules" ? "rule-based (model offline)" : "");
   el.innerHTML =
     `<div class="note">${esc(ai.summary)}</div>` +
-    (ai.quip ? `<div class="watcher-quote">“${esc(ai.quip)}”<span class="watcher-by">— the watcher</span></div>` : "") +
     `<div class="muted-note" style="margin-top:12px">Reasons over the full forensic report ${via ? "· " + via : ""}. One signal — never the verdict. Not financial advice.</div>`;
 }

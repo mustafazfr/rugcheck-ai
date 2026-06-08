@@ -63,9 +63,6 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 @keyframes strike{to{transform:scaleX(1)}}
 .sub{max-width:620px;color:var(--muted);margin:24px 0 14px;font-size:15px}
 .sub strong{color:var(--lime)}
-.quip{max-width:560px;margin:0 0 26px;font-family:var(--disp);font-style:italic;font-size:14px;color:var(--faint);
-  border-left:2px solid var(--line2);padding-left:14px}
-.quip-by{display:block;font-style:normal;font-size:10px;letter-spacing:.14em;text-transform:uppercase;margin-top:4px;color:rgba(118,133,124,.6)}
 
 .searchbar{display:flex;align-items:center;gap:12px;background:var(--panel);
   border:1px solid var(--line2);border-radius:var(--r);padding:6px 6px 6px 18px;max-width:680px;
@@ -95,7 +92,10 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .scan-log{list-style:none;margin:0;padding:0;font-size:13px;color:var(--muted);width:100%;max-width:460px}
 .scan-log li{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line2);opacity:0;transform:translateX(-6px);animation:logIn .3s forwards}
-.scan-log li .ok{color:var(--lime)}
+.scan-log li .ok,.scan-log li .stat.ok{color:var(--lime)}
+.scan-log li .stat{font-size:11px;letter-spacing:.12em;text-transform:uppercase}
+.scan-log li .stat.working{color:var(--cyan);animation:pulse 1s ease-in-out infinite}
+.scan-log li.cur{color:var(--text)}
 @keyframes logIn{to{opacity:1;transform:none}}
 
 /* — reveal — */
@@ -270,12 +270,7 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .srisks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .srisk{font-size:10.5px;color:var(--amber);border:1px solid rgba(255,176,46,.3);background:rgba(255,176,46,.07);padding:2px 8px;border-radius:6px}
 
-/* the watcher — reactive meme face (real gif + SVG fallback) */
-.watcher{position:absolute;top:60px;right:0;width:132px;text-align:center;opacity:0;
-  animation:rise .8s .5s cubic-bezier(.2,.7,.2,1) forwards;color:var(--muted)}
-.watcher-face{width:118px;height:118px;margin:0 auto;color:var(--muted)}
-.watcher-cap{font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:var(--faint);margin-top:6px;display:flex;align-items:center;justify-content:center;gap:5px}
-.watcher-cap .blink{color:var(--lime);font-size:7px}
+/* the watcher — reactive meme face shown in the verdict corner (real gif + SVG fallback) */
 /* gif/svg fill their slot; gif gets a framed, theme-tinted card so it sits in the lab aesthetic */
 .watcher-gif,.watcher-svg{width:100%;height:100%;display:block}
 .watcher-gif{object-fit:cover;border-radius:10px;border:1px solid var(--line2);
@@ -284,11 +279,13 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .watcher-svg.glare{animation:glare-shudder 2.6s ease-in-out infinite}
 @keyframes glare-shudder{0%,100%{transform:none}3%{transform:translateX(-1px)}6%{transform:translateX(1px)}9%{transform:none}}
 /* verdict-corner reaction: top-right of the verdict card. glare gets a red ring, clean gets a lime ring */
-.watcher-corner{position:absolute;top:14px;right:16px;width:74px;height:60px;z-index:2;pointer-events:none}
-.watcher-corner .watcher-gif{border-color:var(--verdict);filter:grayscale(.2) contrast(1.08);
+.watcher-corner{position:absolute;top:14px;right:16px;width:172px;height:146px;z-index:2;pointer-events:none;
+  opacity:1;transition:opacity 1.5s ease}
+.watcher-corner.faded{opacity:0}  /* after ~2–3 plays the JS adds this → soft fade-out, not an abrupt cut */
+.watcher-corner .watcher-gif{border-color:var(--verdict);filter:brightness(1.16) contrast(1.06) saturate(1.05);
   box-shadow:0 0 0 1px var(--verdict-soft),0 0 18px var(--verdict-soft)}
 .watcher-corner .watcher-svg{color:var(--verdict);filter:drop-shadow(0 0 10px var(--verdict-soft))}
-@media(max-width:760px){.watcher{position:static;margin:24px auto 0;opacity:1;animation:none}.watcher-corner{display:none}}
+@media(max-width:760px){.watcher-corner{display:none}}
 
 /* footer */
 .foot{border-top:1px solid var(--line2);padding:30px 24px;text-align:center;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:6px}
