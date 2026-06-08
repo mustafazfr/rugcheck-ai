@@ -52,7 +52,7 @@ function syncUrl(mint) {
   try { history.replaceState(null, "", mint ? `/?mint=${mint}` : "/"); } catch { /* ignore */ }
 }
 window.addEventListener("DOMContentLoaded", () => {
-  setWatcher($("#heroFace"), "watch");  // the watcher idles on the hero
+  setWatcher($("#heroFace"), "safe");  // the watcher idles calm on the hero until a mint is scanned
   const m = new URLSearchParams(location.search).get("mint");
   if (m) { $("#mintInput").value = m; run(m); }
 });
@@ -138,7 +138,7 @@ function render(d) {
   setGauge(d.score);
 
   // the watcher reacts to the verdict — glares at rugs, eases up on clean coins
-  setWatcher($("#watcherReaction"), LEVEL_MOOD[d.level] || "watch");
+  setWatcher($("#watcherReaction"), LEVEL_MOOD[d.level] || "safe");
 
   // checks
   $("#checkMeta").textContent = `${c.total} checks · ${d.meta.took_ms ?? "?"}ms${d.cached ? " · cached" : ""}`;
@@ -267,10 +267,16 @@ function renderTwitter(tw) {
 function _compact(v) { if (v == null) return "—"; if (v < 1000) return "" + v; if (v < 1e6) return (v / 1e3).toFixed(1) + "K"; return (v / 1e6).toFixed(1) + "M"; }
 
 /* ---------- the watcher (reactive meme face) ---------- */
-// glare on bad verdicts, the calmer watch face otherwise. Real gif first; an SVG silhouette is the fallback
-// if the gif is ever missing (404 → onerror swaps it in). currentColor inherits the theme --verdict tint.
-const LEVEL_MOOD = { CRITICAL: "glare", DANGER: "glare", CAUTION: "watch", SAFE: "watch" };
-const _GIF = { glare: "glare", watch: "watch", squint: "watch", content: "watch" };
+// Three faces, keyed to how bad the verdict is:
+//   rugged → "surprise, motherf*****" (caught red-handed)  · CRITICAL
+//   risky  → the cold "I'm watching you" stare             · DANGER / CAUTION
+//   safe   → eased-up / approving                          · SAFE  (placeholder until a clean face is set)
+// Real media first; an SVG silhouette is the fallback if a file is ever missing (404 → onerror swaps it in).
+// currentColor inherits the theme --verdict tint.
+const LEVEL_MOOD = { CRITICAL: "rugged", DANGER: "risky", CAUTION: "risky", SAFE: "safe" };
+// per-face media. `safe` has no file yet (the user is supplying the clean "okay" face) → it renders the calm
+// line-art silhouette below. Drop a `safe.gif`/`safe.png` here and add it to this map to use it.
+const _FACE_FILE = { rugged: "rugged.gif", risky: "risky.png" };
 const HEAD = "M22 28 Q22 13 40 13 L60 13 Q78 13 78 28 L78 55 Q78 85 50 92 Q22 85 22 55 Z";
 const _FALLBACK_SVG = (mood) =>
   `<svg class="watcher-svg ${mood}" viewBox="0 0 100 100" fill="none" stroke="currentColor" ` +
@@ -281,9 +287,13 @@ const _FALLBACK_SVG = (mood) =>
     : `<path d="M22 36 L44 36"/><path d="M56 36 L78 36"/><circle cx="35" cy="50" r="2.8" fill="currentColor" stroke="none"/><circle cx="65" cy="50" r="2.8" fill="currentColor" stroke="none"/><path d="M34 72 L66 72"/>`) +
   `</svg>`;
 function watcherFace(mood) {
-  const gif = _GIF[mood] || "watch";
-  const svg = _FALLBACK_SVG(mood === "glare" ? "glare" : "watch").replace(/"/g, "&quot;");
-  return `<img class="watcher-gif ${mood}" alt="" src="/static/watcher/${gif}.gif" ` +
+  const hostile = (mood === "rugged" || mood === "risky");  // both glare; safe is calm
+  const file = _FACE_FILE[mood];
+  // no media for this mood (e.g. safe until a clean face is supplied) → render the calm silhouette directly,
+  // so there's no broken/404 request. A real file, when present, falls back to the same SVG on load error.
+  if (!file) return _FALLBACK_SVG(hostile ? "glare" : "watch");
+  const svg = _FALLBACK_SVG(hostile ? "glare" : "watch").replace(/"/g, "&quot;");
+  return `<img class="watcher-gif ${mood}" alt="" src="/static/watcher/${file}" ` +
     `onerror="this.outerHTML='${svg}'"/>`;
 }
 function setWatcher(el, mood) { if (el) el.innerHTML = watcherFace(mood); }
