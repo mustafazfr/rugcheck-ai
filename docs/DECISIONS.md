@@ -623,3 +623,27 @@ unreadable in the corner ("you can't even tell it's Doakes"), and the user had a
 
 **Honest note:** ~13s is engine + parallel OSINT + one local-LLM pass; the LLM needs Ollama running (graceful
 rule-fallback if not). Still no paid APIs. 195 tests pass.
+
+### ADR-045 — Groq as the public-deploy LLM provider + MP4 watcher ✅
+**Context:** Planning a public rugcheck.ai raised the one cost that doesn't scale for free — the AI analyst.
+Locally Ollama (qwen2.5:14b) is free, but a public site can't self-host a 9GB model without an always-on home
+box or a rented GPU. The user (weighing a one-time Solana payment, not wanting to over-invest in a new site)
+chose **Groq's free tier** (hosted Llama) for the public LLM. Separately, the watcher GIFs looked soft/small.
+
+**Decisions:**
+- **Optional Groq provider (`llm/analyst.py`):** `cfg.analyst_provider` — `auto` uses Groq when `GROQ_API_KEY`
+  is set (public deploy), else local Ollama (dev); `groq`/`ollama` force one. Groq is called via httpx on its
+  OpenAI-compatible endpoint (no new dependency). The SAME `_SYSTEM` prompt, `<data>`-fenced
+  facts, and `_injected()` output-validation apply to BOTH providers — a hijacked verdict is discarded
+  whichever model produced it. Key lives in `.env` only (Golden Rule #3). Any failure → Ollama → rules; never
+  blocks. `analyst=groq|ollama` logged at startup. Local dev is unchanged (no key → Ollama).
+- **Watcher → MP4 video:** the verdict-corner face is now an autoplay-muted-loop `<video>` instead of a GIF —
+  full colour, no 256-colour banding, sharper, and far smaller (rugged 5.1MB→429KB, risky 1.8MB→68KB).
+  Enlarged 172→212px. Same 2–3-plays-then-soft-fade behaviour + SVG fallback.
+- **Static `Cache-Control: no-cache`:** edits to css/js/media now show up on a normal refresh (ETag still
+  yields a cheap 304 when unchanged) — no more stale-cache "it didn't update" confusion.
+
+**Honest economics (told to the user):** the free keyless stack scales for ~free; the LLM is the exception.
+Groq's free tier removes the GPU-hosting cost for a public launch. The proposed monetization (still open) is a
+one-time Solana-Pay micro-payment gating only the Helius-heavy deep dossier, so the free tier stays $0. 200
+tests pass.

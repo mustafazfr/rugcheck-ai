@@ -41,6 +41,12 @@ class LlmCfg(BaseModel):
     analyst_model: str = "qwen2.5:14b"
     request_timeout_s: int = 60
     fail_open_to_rules: bool = True
+    # Provider for the web AI analyst. "auto" = use Groq when GROQ_API_KEY is set (the public deploy, no GPU
+    # to self-host), else local Ollama (free, for dev). "groq" / "ollama" force one. Groq's free tier runs a
+    # big Llama, so a public site gets good verdicts without renting a GPU box. Same prompt + injection guard.
+    analyst_provider: str = "auto"
+    groq_model: str = "llama-3.3-70b-versatile"
+    groq_base: str = "https://api.groq.com/openai/v1"
 
 
 class GraceCfg(BaseModel):
@@ -342,6 +348,7 @@ class Secrets(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(REPO_ROOT / ".env"), extra="ignore")
 
     helius_api_key: str = ""
+    groq_api_key: str = ""  # optional: free-tier hosted Llama for the web AI analyst when self-hosting Ollama isn't viable
     rugcheck_api_key: str = ""
     tweetscout_api_key: str = ""
     telegram_api_id: str = ""

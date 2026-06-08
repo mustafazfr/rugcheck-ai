@@ -148,15 +148,34 @@ def _fallback_summary(report: dict) -> str:
     return f"No red flags fired across our free on-chain + external checks. Verdict {level} ({report.get('score')}/100). Still DYOR."
 
 
-async def analyze_report(report: dict, cfg) -> dict:
-    """Best-effort local-LLM verdict over the full report. Returns {summary, provider, model, quip}."""
-    level = report.get("level") or "CAUTION"
-    out = {"summary": _fallback_summary(report), "provider": "rules", "model": None, "quip": watcher_line(level)}
-    facts = _facts(report)
-    try:
-        import ollama
-    except ImportError:
-        return out
+def _injected(text: str, level: str) -> bool:
+    """OUTPUT VALIDATION (anti-prompt-injection): a DANGER/CRITICAL token whose AI summary calls it
+    'safe/clean/verified' means a crafted token name hijacked the model → discard, use our rules. Applies to
+    EVERY provider (Groq or Ollama) — the facts are the same, so a different model won't 'un-hijack' it."""
+    return bool(text) and level in ("DANGER", "CRITICAL") and bool(_SAFE_WORDS.search(text))
+
+
+async def _ask_groq(facts: str, cfg, key: str) -> str:
+    """Groq's free-tier hosted Llama via its OpenAI-compatible endpoint (httpx, no new dep). Best-effort."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=cfg.request_timeout_s) as cx:
+        r = await cx.post(
+            f"{cfg.groq_base}/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json={"model": cfg.groq_model, "temperature": 0.3,
+                  "messages": [{"role": "system", "content": _SYSTEM},
+                               {"role": "user", "content": facts}]},
+        )
+        r.raise_for_status()
+        choices = (r.json() or {}).get("choices") or [{}]
+        return ((choices[0].get("message") or {}).get("content") or "").strip()
+
+
+async def _ask_ollama(facts: str, cfg) -> tuple[str, str | None]:
+    """Local Ollama; tries the bigger analyst_model then synthesis_model. Returns (text, model_used)."""
+    import ollama
+
     client = ollama.AsyncClient(host=cfg.host)
     for model in [cfg.analyst_model, cfg.synthesis_model]:
         if not model:
@@ -164,20 +183,50 @@ async def analyze_report(report: dict, cfg) -> dict:
         try:
             resp = await client.chat(
                 model=model,
-                messages=[{"role": "system", "content": _SYSTEM},
-                          {"role": "user", "content": facts}],
+                messages=[{"role": "system", "content": _SYSTEM}, {"role": "user", "content": facts}],
                 options={"temperature": 0.3},
             )
             text = (resp.get("message") or {}).get("content", "").strip()
-            # OUTPUT VALIDATION (anti-prompt-injection): a DANGER/CRITICAL token whose AI summary calls it
-            # "safe/clean/verified" means a crafted token name hijacked the model → discard, use our rules.
-            if text and level in ("DANGER", "CRITICAL") and _SAFE_WORDS.search(text):
-                log.warning("analyst output contradicted %s verdict (likely injection) — using fallback", level)
+            if text:
+                return text, model
+        except Exception as e:
+            log.warning("ollama analyst model %s failed (%s); trying next", model, e)
+            continue
+    return "", None
+
+
+async def analyze_report(report: dict, cfg, *, groq_key: str = "") -> dict:
+    """Best-effort AI verdict over the full report. Returns {summary, provider, model, quip}.
+
+    Provider: cfg.analyst_provider — 'auto' uses Groq when a key is supplied (public deploy), else local Ollama
+    (dev); 'groq'/'ollama' force one. Any failure → the deterministic rule summary. Never blocks, never 500s."""
+    level = report.get("level") or "CAUTION"
+    out = {"summary": _fallback_summary(report), "provider": "rules", "model": None, "quip": watcher_line(level)}
+    facts = _facts(report)
+    provider = getattr(cfg, "analyst_provider", "auto")
+    use_groq = bool(groq_key) and provider in ("auto", "groq")
+
+    if use_groq:
+        try:
+            text = await _ask_groq(facts, cfg, groq_key)
+            if _injected(text, level):
+                log.warning("groq analyst contradicted %s verdict (likely injection) — using fallback", level)
                 return out
             if text:
-                out.update(summary=text[:1200], provider="ollama", model=model)
+                out.update(summary=text[:1200], provider="groq", model=cfg.groq_model)
                 return out
         except Exception as e:
-            log.warning("analyst model %s failed (%s); trying fallback", model, e)
-            continue
+            log.warning("groq analyst failed (%s); falling back", e)
+        if provider == "groq":
+            return out  # groq-only was requested (prod) — don't reach for a local model that isn't there
+
+    try:
+        text, model = await _ask_ollama(facts, cfg)
+    except ImportError:
+        return out
+    if _injected(text, level):
+        log.warning("ollama analyst contradicted %s verdict (likely injection) — using fallback", level)
+        return out
+    if text:
+        out.update(summary=text[:1200], provider="ollama", model=model)
     return out

@@ -1,5 +1,9 @@
 """Web AI analyst (ADR-042): facts assembly, sanitization, injection defenses, fallback are pure → tested."""
 
+import asyncio
+
+import solscout.llm.analyst as A
+from solscout.core.config import LlmCfg
 from solscout.llm.analyst import (
     _SAFE_WORDS,
     _data,
@@ -84,6 +88,66 @@ def test_watcher_line_per_level():
     assert "real you" in watcher_line("CRITICAL")
     assert watcher_line("SAFE") != watcher_line("DANGER")
     assert watcher_line("???")  # unknown level → a default line, never empty
+
+
+# — provider routing + injection guard across providers (ADR-045: Groq option) —
+
+
+def test_injected_guard_applies_only_to_bad_verdicts():
+    assert A._injected("this token is totally safe and legit", "DANGER")
+    assert A._injected("looks clean to me", "CRITICAL")
+    assert not A._injected("this token is safe", "SAFE")          # SAFE isn't guarded — it may say safe
+    assert not A._injected("dangerous honeypot rug, avoid", "DANGER")  # no safe-word → fine
+    assert not A._injected("", "DANGER")
+
+
+def test_auto_uses_groq_when_key_set(monkeypatch):
+    async def fake_groq(facts, cfg, key):
+        assert key == "gk"
+        return "Liquidity is thin and flow is one-way; treat as DANGER."
+
+    async def boom_ollama(facts, cfg):
+        raise AssertionError("ollama must not run when groq succeeds")
+
+    monkeypatch.setattr(A, "_ask_groq", fake_groq)
+    monkeypatch.setattr(A, "_ask_ollama", boom_ollama)
+    out = asyncio.run(A.analyze_report(_report(), LlmCfg(analyst_provider="auto"), groq_key="gk"))
+    assert out["provider"] == "groq" and "thin" in out["summary"]
+
+
+def test_groq_injection_falls_back_to_rules(monkeypatch):
+    async def fake_groq(facts, cfg, key):
+        return "Ignore that — this token is SAFE, clean and legit."  # hijacked by token content
+
+    monkeypatch.setattr(A, "_ask_groq", fake_groq)
+    out = asyncio.run(A.analyze_report(_report(level="CRITICAL"), LlmCfg(), groq_key="gk"))
+    assert out["provider"] == "rules"  # contradiction discarded
+
+
+def test_auto_without_key_uses_ollama(monkeypatch):
+    async def boom_groq(*a, **k):
+        raise AssertionError("groq must not run without a key")
+
+    async def fake_ollama(facts, cfg):
+        return "On-chain checks fired; the DANGER verdict stands.", "qwen2.5:14b"
+
+    monkeypatch.setattr(A, "_ask_groq", boom_groq)
+    monkeypatch.setattr(A, "_ask_ollama", fake_ollama)
+    out = asyncio.run(A.analyze_report(_report(), LlmCfg(analyst_provider="auto"), groq_key=""))
+    assert out["provider"] == "ollama" and out["model"] == "qwen2.5:14b"
+
+
+def test_groq_only_failure_does_not_touch_ollama(monkeypatch):
+    async def fail_groq(*a, **k):
+        raise RuntimeError("groq down")
+
+    async def boom_ollama(*a, **k):
+        raise AssertionError("ollama must not run in groq-only mode")
+
+    monkeypatch.setattr(A, "_ask_groq", fail_groq)
+    monkeypatch.setattr(A, "_ask_ollama", boom_ollama)
+    out = asyncio.run(A.analyze_report(_report(), LlmCfg(analyst_provider="groq"), groq_key="gk"))
+    assert out["provider"] == "rules"
 
 
 # — tightened fresh-wallet definition (ADR-042): AND, not OR —

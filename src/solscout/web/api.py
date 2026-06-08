@@ -77,7 +77,9 @@ async def lifespan(app: FastAPI):
             app.state.clients = dict(dex=dex, gecko=gecko, rpc=rpc, helius=helius, jup=jup,
                                      rc=rc, gp=gp, twp=twp, tg=tg, ts=ts)
             app.state.helius_on = bool(secrets.helius_api_key)
-            log.info("rugcheck.ai up — helius=%s", app.state.helius_on)
+            app.state.groq_key = secrets.groq_api_key  # optional; analyst uses it when set, else local Ollama
+            log.info("rugcheck.ai up — helius=%s · analyst=%s", app.state.helius_on,
+                     "groq" if app.state.groq_key else "ollama")
             yield
 
 
@@ -126,7 +128,7 @@ async def check(mint: str, refresh: bool = False):
         report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
         # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is
         # assembled so the model cites the actual findings, not just name+market. Free + local; best-effort.
-        report["ai"] = await analyst.analyze_report(report, cfg.llm)
+        report["ai"] = await analyst.analyze_report(report, cfg.llm, groq_key=app.state.groq_key)
     except Exception as e:  # never 500 the user — return a graceful error report
         log.warning("check %s failed: %s", mint[:8], e)
         return JSONResponse(

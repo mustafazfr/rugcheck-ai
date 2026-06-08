@@ -31,6 +31,11 @@ llm:
                                  # `ollama pull qwen2.5:14b`. Falls back to synthesis_model if not present.
   request_timeout_s: 60
   fail_open_to_rules: true     # if Ollama is unreachable, run rule-only (drop narrative weight)
+  # AI-analyst provider. "auto" = Groq when GROQ_API_KEY is set (public deploy, no GPU to self-host), else
+  # local Ollama (free, dev). "groq" / "ollama" force one. Same prompt + prompt-injection guard either way.
+  analyst_provider: "auto"
+  groq_model: "llama-3.3-70b-versatile"   # update to a current Groq model if they rotate it
+  groq_base: "https://api.groq.com/openai/v1"
 
 # GeckoTerminal — FREE, no key (~30 req/min). Our fresh-token (new_pools) + winners (trending_pools) source.
 geckoterminal:
