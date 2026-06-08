@@ -1,0 +1,36 @@
+# secrets — NEVER commit
+.env
+*.session            # telethon sessions
+config/config.yaml   # local config (keep config.example.yaml)
+
+# data / db
+*.db
+*.sqlite*
+data_cache/
+
+# runtime logs / pids (background scripts)
+logs/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+uv.lock
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
+
+# sqlite sidecars + local backups (must not commit)
+*.db-shm
+*.db-wal
+*.db-wal*
+*.bak
+_old_db/

@@ -1,0 +1,216 @@
+# SolScout configuration. Copy to config/config.yaml and tune.
+# NO magic numbers in code — every threshold/weight lives here.
+#
+# FREE/KEYLESS STACK ONLY (ADR-036): Helius free tier (credit-governed) + DexScreener + GeckoTerminal +
+# public Solana RPC + Jupiter quote + local Ollama. No paid APIs. pump.fun is GONE.
+
+# 'free' | 'standard' | 'pro'  (see docs/BACKUP_PLAN.md cost tiers)
+cost_tier: free
+
+# Solana RPC for CHEAP calls (mint authorities/supply). Empty = free public mainnet RPC.
+# Put ANY provider's URL here (QuickNode/Ankr/Alchemy/your own node) to NOT spend Helius credits on these.
+# Helius (HELIUS_API_KEY in .env) is then used ONLY for the metered holder call.
+solana_rpc_url: ""
+
+# Helius free tier ≈ 1,000,000 credits/MONTH; holder/DAS calls are metered (ADR-020/022).
+helius:
+  cache_ttl_s: 600             # memoize holders per mint so recheck doesn't re-spend credits
+  monthly_budget_funnel: 650000     # run/scan/report funnel (holder calls)
+  monthly_budget_discover: 250000   # discovery (winner holder sets + optional finalist vetting)
+  cost_per_call: 10.0               # approx credits per DAS/enhanced call
+  cost_per_gpa: 5.0                 # approx credits per getProgramAccounts holder call
+  # Align our ESTIMATE to the real Helius dashboard with:  solscout credits-sync <number>
+
+llm:
+  host: "http://localhost:11434"
+  synthesis_model: "qwen2.5:latest"
+  classify_model: "llama3.2:3b"
+  request_timeout_s: 60
+  fail_open_to_rules: true     # if Ollama is unreachable, run rule-only (drop narrative weight)
+
+# GeckoTerminal — FREE, no key (~30 req/min). Our fresh-token (new_pools) + winners (trending_pools) source.
+geckoterminal:
+  network: solana
+  poll_s: 30                   # how often the funnel pulls new_pools
+  new_pools_pages: 1           # 1 page ≈ 20 newest pools/poll (stay under the rate limit)
+
+ingest:
+  min_initial_liquidity_usd: 2000
+  min_liquidity_to_analyze: 15000   # only analyze coins with a real DEX market (free pre-screen)
+  max_analyses_per_min: 30          # burst cap on Helius-funnel work
+  grace:                       # not-ready tokens (not indexed / not matured) → re-evaluate later
+    enabled: true
+    first_delay_s: 300         # wait 5 min before first re-eval (indexing + maturity)
+    max_attempts: 5
+    backoff_mult: 1.6          # 300s,480s,768s,1229s,1966s ≈ up to ~80 min
+
+# Smart-money DISCOVERY = "recurring holders across unrelated winners" (ADR-036). FREE: GeckoTerminal
+# trending winners + Helius holder sets. A wallet in >= min_distinct_winners DISTINCT recent winners = smart.
+discovery:
+  enabled: true
+  cycle_s: 90                  # pull trending winners this often
+  winners_per_cycle: 6         # cap NEW winners we fetch holders for per cycle (credit budget)
+  top_holders: 40              # holders per winner considered as candidate smart money
+  min_distinct_winners: 2      # appear in >= this many DISTINCT winners → promote to watchlist
+  max_distinct_winners: 25     # appear in MORE than this → exchange/infra wallet, not alpha → drop
+  lookback_days: 14            # rolling window for "distinct winners"
+  vet_finalists: false         # optional: 1 Helius enhanced-call/finalist (cheap now) → PnL-rank + drop bots
+  winner_min_liquidity_usd: 20000
+  winner_min_volume_24h_usd: 50000
+  winner_max_age_days: 30
+  winner_min_seller_share: 0.10   # ADR-037: don't mine wash-traded / one-way pumps (bad wallets)
+  winner_max_vol_liq_ratio: 30.0  # volume/liquidity above this = wash → not a real winner
+
+# Stage 1 — hard on-chain filters (any breach => REJECT)
+filters:
+  require_mint_renounced: true
+  require_freeze_null: true
+  require_lp_locked_or_burned: true
+  # Concentration is NOT a blanket veto anymore (new memes are concentrated by nature). max_top10_holder_pct
+  # is only the knee of the graded safety score; we HARD-veto only genuinely dangerous, trustworthy levels:
+  max_top10_holder_pct: 35           # score knee (not a veto)
+  extreme_top10_pct: 90              # HARD veto: top-10 holds ~everything (trustworthy set, infra excluded)
+  single_wallet_max_pct: 50          # HARD veto: one non-infra wallet can dump the whole market
+  max_dev_hold_pct: 10
+  max_bundle_pct: 25
+  bundle_window_blocks: 20
+  min_liquidity_usd: 5000            # DEX-listed tokens (DexScreener liquidity) — analyze floor
+  min_liquidity_for_buy_usd: 25000   # ADR-037: a BUY needs a real, EXITABLE pool (stricter than analyze)
+  exclude_pump_origin: false          # ADR-038: true = reject ALL pump.fun-origin coins (…pump / PumpSwap)
+  min_pair_age_minutes: 15           # MATURITY gate: don't BUY until the pair is this old
+  min_volume_24h_usd: 3000           # below this = effectively dead/untraded (feeds the safety score)
+  require_sell_simulation: false     # honeypot guard via Jupiter round-trip quote (free); enable once verified
+  max_buy_sell_tax_pct: 15
+
+# Stage 1b — anti-rug / anti-manipulation (ADR-037). Catch wash-traded / honeypot / hyper-pump coins BEFORE
+# buying (the SPCX/BARRON/SV151 pattern). FREE signals: DexScreener txns + GeckoTerminal unique buyers/sellers.
+manipulation:
+  enabled: true
+  min_unique_traders: 50             # below this, buyers/sellers data is too thin to judge
+  min_seller_share: 0.08             # sellers/(buyers+sellers) must be ≥ this (BARRON: 33/1729 ≈ 2% → veto)
+  max_vol_liq_ratio: 25.0            # volume/liquidity above this = wash churn
+  wash_liquidity_usd: 60000          # wash is a HARD veto only when the pool is also this thin
+  max_txn_imbalance: 6.0             # max(buys,sells)/min(buys,sells) txn ratio → soft penalty
+  young_minutes: 90                  # "brand new" window for the hyper-pump veto
+  max_young_pump_pct: 400            # +% (24h) above this on a young thin pool = manipulation → veto
+  young_pump_liquidity_usd: 80000
+  min_float_pct: 8.0                 # circulating (non-pool) supply % must be ≥ this (soft) when trusted
+  soft_penalty: 0.6                  # multiply safety_score by this when a SOFT manipulation flag fires
+  # REAL-ACTIVITY floor (ADR-038) — reject husks / one-way honeypots (WIF 37 holders/1 txn; BARRON 3/0; IRAN 1/0)
+  min_holders: 50                    # reject when the trusted holder count is below this
+  min_traders: 40                    # reject when unique buyers+sellers (24h) is below this
+  no_seller_min_buyers: 10           # ≥ this many buyers but ZERO sellers → honeypot/one-way → reject
+
+# Stage 3b — bundle / sybil-cluster detection (ADR-038, the Bubblemaps signal). For a BUY candidate, trace the
+# top holders' SOL funders (Helius, cached); many top holders sharing ONE funder = insider/sybil distribution
+# that holder-concentration can't see → REJECT. Runs ONLY on BUY candidates (few) to stay credit-cheap.
+cluster:
+  enabled: true
+  top_n: 12                          # how many top holders to trace funding for
+  tx_limit: 100                      # enhanced-tx depth per holder
+  min_cluster_size: 4                # this many top holders sharing ONE funder = a bundle
+  max_funder_share: 0.35             # OR one funder backing ≥ this fraction of the traced holders
+
+# Stage 3c — RugCheck.xyz aggregated rug analysis (ADR-039, FREE, no key). Independent risk read: overall
+# score, LP-lock, insider graph, `rugged` flag. Flaky third party → fails OPEN (no report → our own checks).
+rugcheck:
+  enabled: true
+  veto_score: 60                     # score_normalised ≥ this → HARD veto (BONK≈7; a dead husk≈71)
+  soft_score: 35                     # score in [soft, veto) → safety-score penalty
+  max_insider_holders: 3             # this many RugCheck-flagged insider top-holders → bundle veto
+  critical_risks: ["honeypot", "can't sell", "cannot sell", "freeze authority enabled"]
+  trust_insiders: true               # use RugCheck's insider graph → skip our Helius funder-trace (saves credits)
+
+# Stage 3d — GoPlus Security (ADR-041, FREE, no key). An INDEPENDENT 2nd rug source next to RugCheck:
+# authorities, transfer-hook / non-transferable (Token-2022 honeypots), transfer-fee, malicious-creator flag.
+goplus:
+  enabled: true
+  max_transfer_fee_pct: 10.0         # transfer fee above this = a tax trap → hard veto
+
+# Deep deployer + buyer OSINT (ADR-041) — the rugcheck.ai web path "turns the coin upside down":
+# the creator wallet's prior launches + funding, and the top buyers' wallet history (fresh-sybil cluster).
+twitter:
+  enabled: true                      # keyless X profile intel via fxtwitter (age/followers/verified)
+  min_age_days: 30                   # younger than this = brand-new account flag
+  mature_age_days: 365
+  min_followers: 500
+  min_tweets: 20
+deployer:
+  enabled: true
+  tx_limit: 100                      # creator wallet enhanced-tx depth
+  serial_creator_min: 4              # this many prior token creations → serial-deployer flag
+  holders_intel_top_n: 8             # how many top buyers to profile (Helius calls — governed + cached)
+  holder_tx_limit: 60
+  fresh_buyer_min: 5                 # this many fresh wallets among the top buyers → sybil-cluster flag
+
+# Stage 2 — social (degrades gracefully; no paid keys). TweetScout/Telegram optional.
+social:
+  max_twitter_handle_reuse: 0
+  min_twitter_account_age_days: 30
+  require_ca_tweet_proof: false
+  min_followers: 200
+  min_tg_unique_speakers: 15
+  telegram_mode: public_web          # public_web | bot | off — NEVER a personal account (ADR-016)
+
+# Stage 3 — smart-money signal (fed by discovery above)
+smart_money:
+  watchlist_min_winrate: 0.66        # matches winrate_from_winners(2 winners)=0.66
+  reject_if_deployer_rugged_before: true
+  check_deployer: false              # credit diet: deployer history = 1 expensive Helius call/launch
+  min_wallets_for_gate: 1            # >= this many proven wallets in → "smart" BUY tier (full size)
+
+# Stage 5 — deterministic scoring. Weights sum ~1.0; engine renormalizes over available signals.
+scoring:
+  weights:
+    safety: 0.30
+    smart_money: 0.30
+    social: 0.25
+    narrative: 0.15
+  # TWO BUY tiers: smart (a proven wallet is in → full size, buy_threshold) vs quality (no smart money →
+  # half size, higher bar). Smart-money is a BOOST + size multiplier, never a hard gate.
+  buy_threshold: 62                  # smart-tier BUY bar
+  quality_buy_min_score: 68          # quality-tier BUY bar (stricter, no smart-money confirmation)
+  quality_size_mult: 0.5             # quality-tier position size = this × normal
+  watch_threshold: 45
+  # OPPORTUNITY zone (money focus) — only surface coins that can still multiply; old/dead/mega hidden.
+  opp_min_market_cap_usd: 30000
+  opp_max_market_cap_usd: 10000000
+  opp_min_volume_ratio: 0.30         # 24h volume must be >= 30% of liquidity (real momentum)
+  opp_max_age_days: 7
+  # LLM rug guard — Qwen flags scam language / fake community → HARD-CAP the score.
+  llm_scam_score_cap: 30
+  llm_min_authenticity: 0.20
+
+# Stage 6/7 — execution & risk. PAPER unless mode=live AND env SOLSCOUT_ALLOW_LIVE=1
+execution:
+  mode: paper                  # paper | semi_auto | live
+  semi_auto_min_score: 75
+  per_trade_cap_sol: 0.25
+  daily_loss_limit_sol: 1.0
+  max_open_positions: 5
+  max_total_exposure_sol: 2.0
+  risk_fraction: 0.1
+  max_slippage_bps: 300        # 3% (used only as a fallback when pool liquidity is unknown)
+  max_pool_share_pct: 1.0      # ADR-037: never bet more than this % of a pool's liquidity (shrink the trade)
+  priority_fee_microlamports: 100000
+  use_jito_bundle: true
+
+position:
+  take_profit_pct: [50, 100, 300]    # ladder
+  stop_loss_pct: 35
+  trailing_stop_pct: 25
+  time_stop_minutes: 240
+  exit_if_smart_money_exits: true
+  # ADR-037 rug exit: liquidity collapsed → you can't sell → book a (near-total) loss, not a fictional fill.
+  rug_liquidity_usd: 2000            # current liquidity below this = rugged
+  rug_liquidity_drop_pct: 70         # OR dropped more than this % from entry liquidity = rugged
+
+run:
+  summary_every_s: 60          # emit a rolling FUNNEL summary line this often (observability)
+
+storage:
+  db_path: "./solscout.db"
+
+alerts:
+  telegram_bot_token: ""       # optional, for BUY/WATCH/exit/kill notifications
+  telegram_chat_id: ""

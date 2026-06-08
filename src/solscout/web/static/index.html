@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rugcheck.ai — Solana token forensics</title>
+<meta name="description" content="Free, on-chain Solana token safety forensics — rug, honeypot, wash-trade, bundle & insider detection in one scan." />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/static/styles.css" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23070a0c'/%3E%3Cpath d='M16 4l10 5v7c0 6-4.3 10-10 12C10.3 26 6 22 6 16V9z' fill='none' stroke='%23c4f73a' stroke-width='2'/%3E%3C/svg%3E" />
+</head>
+<body>
+<div class="scanlines" aria-hidden="true"></div>
+<div class="grid-bg" aria-hidden="true"></div>
+<div class="glow" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="/">
+    <svg class="shield" viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 5v8c0 7-4.8 11.4-11 13.5C9.8 27.4 5 23 5 16V8z"/></svg>
+    <span class="brand-name">rugcheck<span class="dot">.ai</span></span>
+  </a>
+  <nav class="topnav">
+    <span class="tag">FREE</span>
+    <span class="tag">ON-CHAIN</span>
+    <span class="health" id="health" title="provider status"><i></i> systems</span>
+  </nav>
+</header>
+
+<main>
+  <!-- HERO / SEARCH -->
+  <section class="hero" id="hero">
+    <div class="kicker"><span class="blink">▮</span> SOLANA TOKEN FORENSICS</div>
+    <h1 class="headline">Is it a <span class="rug">rug</span>?<br />Scan before you ape.</h1>
+    <p class="sub">Paste a Solana token mint. We run it through <strong id="checkCount">20+</strong> free on-chain
+      &amp; external checks — authorities, liquidity, holder clusters, wash-trading, honeypot &amp; insider
+      bundles — and hand you a forensic verdict in seconds.</p>
+
+    <form class="searchbar" id="searchForm" autocomplete="off">
+      <span class="prompt">&gt;</span>
+      <input id="mintInput" name="mint" spellcheck="false" placeholder="paste token mint address…"
+             aria-label="token mint address" />
+      <button type="submit" id="scanBtn"><span class="lbl">SCAN</span><span class="arrow">↳</span></button>
+    </form>
+    <div class="examples">
+      <span class="ex-label">try:</span>
+      <button class="chip" data-mint="EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm">dogwifhat</button>
+      <button class="chip" data-mint="DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263">BONK</button>
+      <button class="chip" data-mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v">USDC</button>
+    </div>
+    <p class="err" id="err" hidden></p>
+  </section>
+
+  <!-- SCANNING -->
+  <section class="scanning" id="scanning" hidden>
+    <div class="scan-core"><div class="ring"></div><div class="ring r2"></div><div class="reticle">⌖</div></div>
+    <ul class="scan-log" id="scanLog"></ul>
+  </section>
+
+  <!-- REPORT -->
+  <section class="report" id="report" hidden>
+    <form class="rescan reveal" id="rescanForm" autocomplete="off">
+      <span class="prompt">&gt;</span>
+      <input id="mintInput2" spellcheck="false" placeholder="scan another mint…" aria-label="token mint address" />
+      <button type="submit"><span class="lbl">SCAN</span></button>
+      <a class="newscan" href="/">↺ new</a>
+    </form>
+    <!-- verdict -->
+    <div class="verdict-wrap reveal">
+      <div class="gauge-box">
+        <svg class="gauge" viewBox="0 0 220 220" id="gauge">
+          <circle class="g-track" cx="110" cy="110" r="92" pathLength="100"/>
+          <circle class="g-fill" cx="110" cy="110" r="92" id="gFill" pathLength="100"/>
+          <text class="g-score" x="110" y="104" id="gScore">0</text>
+          <text class="g-out" x="110" y="136" id="gOut">/100 SAFETY</text>
+        </svg>
+      </div>
+      <div class="verdict-main">
+        <div class="badge" id="badge">—</div>
+        <div class="token-id">
+          <span class="t-name" id="tName">—</span>
+          <span class="t-sym" id="tSym"></span>
+          <span class="t-dex" id="tDex"></span>
+        </div>
+        <p class="verdict-summary" id="vSummary"></p>
+        <div class="counts" id="counts"></div>
+        <div class="links" id="links"></div>
+        <code class="mint-line" id="mintLine"></code>
+      </div>
+    </div>
+
+    <!-- check grid -->
+    <div class="section-head reveal"><h2>Forensic checks</h2><span class="rule"></span><span class="meta" id="checkMeta"></span></div>
+    <div class="checks" id="checks"></div>
+
+    <!-- creator + twitter (the OSINT the user asked for) -->
+    <div class="section-head reveal"><h2>Who's behind it</h2><span class="rule"></span><span class="meta">deployer · X · buyers</span></div>
+    <div class="cols">
+      <div class="panel reveal" id="deployerPanel">
+        <h3>Creator / deployer <span class="byline">/ on-chain</span></h3>
+        <div id="deployerBody"></div>
+      </div>
+      <div class="panel reveal" id="twitterPanel">
+        <h3>Twitter / X <span class="byline">/ keyless</span></h3>
+        <div id="twitterBody"></div>
+      </div>
+    </div>
+
+    <!-- holders + buyer history -->
+    <div class="cols">
+      <div class="panel reveal" id="holdersPanel">
+        <h3>Holders &amp; buyer history</h3>
+        <div class="hstat" id="hStat"></div>
+        <div class="bars" id="holderBars"></div>
+      </div>
+      <div class="panel reveal" id="marketPanel">
+        <h3>Market &amp; liquidity</h3>
+        <div class="metrics" id="metrics"></div>
+        <div class="flow" id="flow"></div>
+      </div>
+    </div>
+
+    <!-- source consensus + AI -->
+    <div class="cols">
+      <div class="panel reveal" id="rcPanel">
+        <h3>Source consensus <span class="byline">/ RugCheck + GoPlus</span></h3>
+        <div id="rcBody"></div>
+      </div>
+      <div class="panel reveal ai" id="aiPanel">
+        <h3>AI analyst <span class="byline">/ local Qwen</span></h3>
+        <div id="aiBody"></div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div>rugcheck<span class="dot">.ai</span> — free, on-chain Solana token forensics.</div>
+  <div class="disc">Not financial advice. No screen catches every scam — this is a defensive screener, not a guarantee. Always DYOR.</div>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

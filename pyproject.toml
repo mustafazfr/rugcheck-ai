@@ -1,0 +1,44 @@
+[project]
+name = "solscout"
+version = "0.0.1"
+description = "Solana meme-coin intelligence & paper-first trading bot"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"   # NOT 3.14: Solana libs lack wheels (see docs/DECISIONS.md ADR-002)
+dependencies = [
+    "httpx>=0.27",            # async HTTP for all data/ clients
+    "websockets>=12",         # PumpPortal / Helius streams
+    "pydantic>=2.7",          # models + LLM structured-output validation
+    "pydantic-settings>=2.3", # .env loading
+    "pyyaml>=6",              # config
+    "typer>=0.12",            # CLI
+    "rich>=13",               # report rendering
+    "tenacity>=8",            # retry/backoff in clients
+    "aiosqlite>=0.20",        # async SQLite persistence
+    "ollama>=0.3",            # local LLM (qwen2.5 / llama3.2)
+    "solana>=0.34",           # RPC client
+    "solders>=0.21",          # keys, txns, primitives
+    "telethon>=1.36",         # Telegram (optional path)
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+]
+
+[project.scripts]
+solscout = "solscout.cli:app"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "ruff>=0.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/solscout"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
