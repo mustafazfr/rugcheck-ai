@@ -26,9 +26,11 @@ log = get_logger("solscout.web.osint")
 
 
 def is_fresh_wallet(summary: dict) -> bool:
-    """A 'fresh' wallet has almost no trading history — a brand-new account that only touched this token
-    (the classic insider/sybil tell among top holders). Pure."""
-    return summary.get("swaps_total", 0) <= 2 or summary.get("distinct_tokens", 0) <= 1
+    """A 'fresh' wallet has almost NO trading history: a near-empty, brand-new account that has barely
+    swapped and touched barely any tokens. Many fresh wallets among a token's top holders = a likely
+    insider/sybil cluster (the dev funded throwaway wallets to fake distribution). Pure.
+    Tightened to AND (ADR-042): a busy single-token degen is not 'fresh' — only genuinely empty wallets are."""
+    return summary.get("swaps_total", 0) <= 3 and summary.get("distinct_tokens", 0) <= 2
 
 
 def first_tx_age_days(txs: list[dict]) -> int | None:

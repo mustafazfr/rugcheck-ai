@@ -212,6 +212,13 @@ function renderHolders(h, intel) {
     `<span class="bar-track"><span class="bar-fill" data-w="${(x.pct / max * 100).toFixed(1)}"></span></span>` +
     `<span class="pct">${x.pct.toFixed(1)}%</span></div>`;
   }).join("");
+  if (intel && intel.profiled) {
+    $("#holderBars").insertAdjacentHTML("beforeend",
+      `<div class="legend"><b>fresh</b> = near-empty / brand-new wallet (almost no trade history) — ` +
+      `we traced the top ${intel.profiled} holders and ${intel.fresh} look like that. ` +
+      `Many fresh wallets = likely insider/sybil cluster faking the holder count. ` +
+      `<span class="wtag trader">trader</span> = a real, active wallet.</div>`);
+  }
   requestAnimationFrame(() => $$("#holderBars .bar-fill").forEach((b) => b.style.width = b.dataset.w + "%"));
 }
 
