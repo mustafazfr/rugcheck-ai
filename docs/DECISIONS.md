@@ -575,3 +575,25 @@ without disturbing the loved UI; commit + push continuously.
 for a bigger model) + adversarial-safe + on-brand humor. Fine-tuning is a future option but unnecessary now —
 the win was the prompt. 189 tests pass. Open question deferred by the user: final product name (rugcheck.ai
 collides with rugcheck.xyz).
+
+### ADR-043 — Surface the richer RugCheck data + go beyond the competition ✅
+**Context:** The user compared us to another Solana scanner (rugcheck.xyz-style) and asked whether we provide
+its features. We already call RugCheck `/report` — which carries all of it — but only displayed the score.
+
+**Decisions (data was already fetched; we just surface it now):** extend `RugCheckReport` with
+`creator_balance` (dev's current holdings), `lp_locked_pct` (best across `markets[].lp.lpLockedPct`),
+`total_lp_providers`, `markets_count`, `total_market_liquidity`, `insider_networks` (the named
+coordinated-wallet clusters), and `known_accounts` (address→label). `web/osint.py` emits an `overview` block
+(supply, LP-locked %, markets, providers), a `deployer.dev_holdings_pct` / `dev_sold` signal, an
+`insider_networks` list, and a `labels` map. `web/report.py` adds two checks — "Liquidity is locked"
+(`lp_unlocked` is a DANGER veto) and "Dev not over-holding supply" (`dev_holds_large` soft) — plus the new
+blocks. Frontend: Market panel now shows LP-locked % + markets; a new **Insider networks** panel lists the
+clusters with wallet counts + % supply; top-holder bars are labeled with known accounts (Pump.fun AMM,
+Streamflow Vault, Meteora, …).
+
+**Why / honest comparison (told to the user):** We now match that tool's surface (score, creator, dev
+holdings, LP lock, holders, insider networks, market list, known-account labels) AND already exceed it with
+features it lacks: a 2nd independent rug source (GoPlus), keyless Twitter identity analysis, deployer wallet
+history (prior launches + funding + age), buyer-wallet freshness/sybil tracing, a local-LLM verdict over the
+whole report, and a Jupiter honeypot sell-sim. Verified live on BONK: LP locked 100% · 80 providers · 202
+markets · insider clusters (damp-fawn-possum 2888 wallets / 12.7%) · labeled holders. 190 tests pass.

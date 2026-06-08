@@ -250,6 +250,13 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .wtag{font-size:9px;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:5px;margin-left:4px;vertical-align:middle}
 .wtag.fresh{color:var(--red);background:rgba(255,77,87,.12);border:1px solid rgba(255,77,87,.3)}
 .wtag.trader{color:var(--lime);background:rgba(196,247,58,.1);border:1px solid rgba(196,247,58,.28)}
+.wtag.known{color:var(--cyan);background:rgba(84,230,207,.08);border:1px solid rgba(84,230,207,.28)}
+.net-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+.net-tbl th{text-align:left;color:var(--faint);font-size:10px;letter-spacing:.1em;text-transform:uppercase;padding:4px 0;border-bottom:1px solid var(--line2)}
+.net-tbl td{padding:7px 0;border-bottom:1px solid var(--line2)}
+.net-tbl tr:last-child td{border-bottom:0}
+.net-tbl code{color:var(--muted);font-size:12px}
+.net-tbl td.neg{color:var(--red);font-weight:600}
 .bar-row .addr a{color:var(--muted)} .bar-row .addr a:hover{color:var(--cyan)}
 .legend{margin-top:12px;font-size:11px;line-height:1.5;color:var(--faint);border-top:1px solid var(--line2);padding-top:10px}
 .legend b{color:var(--red)}

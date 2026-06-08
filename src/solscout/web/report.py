@@ -48,9 +48,10 @@ DANGER_FLAGS = {
     "fresh_buyer_cluster",
     "twitter_inauthentic",
 }
+DANGER_FLAGS |= {"lp_unlocked"}  # ADR-043: LP not locked → dev can pull liquidity
 SOFT_FLAGS = {
     "high_turnover", "txn_imbalance", "low_float", "rugcheck_elevated", "llm_rug",
-    "goplus_closable", "goplus_mutable_metadata", "twitter_weak", "no_twitter",
+    "goplus_closable", "goplus_mutable_metadata", "twitter_weak", "no_twitter", "dev_holds_large",
 }
 
 LEVELS = ("SAFE", "CAUTION", "DANGER", "CRITICAL")
@@ -142,6 +143,10 @@ def build_report(a, cfg, *, osint: dict | None = None, took_ms: int | None = Non
         "holders_intel": osint.get("holders_intel"),
         "sources": osint.get("sources"),
         "goplus": metrics.get("goplus"),
+        # ADR-043 — richer overview surface (LP lock, dev holdings, markets) + named insider networks
+        "overview": osint.get("overview"),
+        "insider_networks": osint.get("insider_networks"),
+        "labels": osint.get("labels"),
         "meta": {
             "analyzed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "took_ms": took_ms,
@@ -313,6 +318,20 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
             out.append(_check("dep_age", "Creator wallet has history", "Creator / deployer",
                               "warn" if dep["age_days"] < 7 else "pass",
                               f"Creator wallet ~{dep['age_days']}d old"))
+        if dep.get("dev_holdings_pct") is not None:
+            pct = dep["dev_holdings_pct"]
+            detail = ("Dev wallet holds none of the supply" if pct < 0.01
+                      else f"Dev still holds {pct}% of supply")
+            out.append(_check("dev_hold", "Dev not over-holding supply", "Creator / deployer",
+                              "warn" if has("dev_holds_large") else "pass", detail))
+
+    # — LP lock (ADR-043) —
+    ov = (osint.get("overview") or {})
+    if ov.get("lp_locked_pct") is not None:
+        lp = ov["lp_locked_pct"]
+        out.append(_check("lp_lock", "Liquidity is locked", "Liquidity",
+                          "fail" if has("lp_unlocked") else "pass",
+                          f"LP locked {lp:.1f}%" + (f" · {ov.get('total_lp_providers')} LP providers" if ov.get('total_lp_providers') else "")))
 
     # — Buyers' wallets (ADR-041) —
     hi = (osint.get("holders_intel") or {})

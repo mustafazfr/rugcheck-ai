@@ -55,3 +55,29 @@ def test_warn_risk_does_not_veto():
 def test_disabled_returns_nothing():
     hard, soft = flags(_rep(rugged=True, score=99), RugCheckCfg(enabled=False))
     assert hard == [] and soft == []
+
+
+# — ADR-043: richer overview fields (LP lock per-market, insider networks, known accounts) —
+
+def test_parse_overview_fields():
+    from solscout.data.rugcheck import RugCheckClient
+    import asyncio
+    payload = {
+        "score_normalised": 7, "rugged": False, "creator": "DEV", "creatorBalance": 0,
+        "totalLPProviders": 80, "totalMarketLiquidity": 2_000_000,
+        "markets": [{"lp": {"lpLockedPct": 99.9}}, {"lp": {"lpLockedPct": 12.0}}],
+        "insiderNetworks": [{"id": "damp-fawn-possum", "size": 2888, "tokenAmount": 100}],
+        "knownAccounts": {"AddrA": {"name": "Pump.fun AMM", "type": "AMM"}, "AddrB": {"type": "LOCKER"}},
+        "topHolders": [], "risks": [],
+    }
+    c = RugCheckClient()
+
+    async def fake(url, cache_key=None):
+        return payload
+    c.get_json = fake  # type: ignore
+    r = asyncio.run(c.report("m"))
+    assert r.lp_locked_pct == 99.9  # best (deepest pool's) lock
+    assert r.total_lp_providers == 80 and r.markets_count == 2
+    assert r.creator_balance == 0
+    assert r.insider_networks[0]["id"] == "damp-fawn-possum" and r.insider_networks[0]["size"] == 2888
+    assert r.known_accounts["AddrA"] == "Pump.fun AMM" and r.known_accounts["AddrB"] == "LOCKER"

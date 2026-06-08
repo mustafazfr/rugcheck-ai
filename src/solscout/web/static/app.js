@@ -147,8 +147,9 @@ function render(d) {
   // deployer / twitter / holders+buyers / sources / ai
   renderDeployer(d.deployer);
   renderTwitter(d.twitter);
-  renderHolders(d.holders, d.holders_intel);
-  renderMarket(d.market, d.flow);
+  renderHolders(d.holders, d.holders_intel, d.labels);
+  renderMarket(d.market, d.flow, d.overview);
+  renderInsiderNetworks(d.insider_networks);
   renderSources(d.sources, d.honeypot);
   renderAI(d.ai);
 
@@ -193,11 +194,12 @@ function renderChecks(checks) {
   }).join("");
 }
 
-function renderHolders(h, intel) {
+function renderHolders(h, intel, labels) {
   if (!h || (h.count == null && !(h.distribution || []).length)) {
     $("#hStat").innerHTML = `<span class="muted-note">Holder set not fully resolvable (token too large or not indexed).</span>`;
     $("#holderBars").innerHTML = ""; return;
   }
+  labels = labels || {};
   const fresh = intel && intel.profiled ? intel.fresh : null;
   $("#hStat").innerHTML =
     `<div><div class="v">${h.count != null ? num(h.count) : "—"}</div><div class="k">holders</div></div>` +
@@ -211,7 +213,9 @@ function renderHolders(h, intel) {
   const max = Math.max(1, ...dist.map((x) => x.pct));
   $("#holderBars").innerHTML = dist.map((x, i) => {
     const r = byOwner[x.owner];
-    const tag = r ? (r.fresh ? `<span class="wtag fresh">fresh</span>` : (r.trader ? `<span class="wtag trader">trader</span>` : "")) : "";
+    const lbl = labels[x.owner];
+    const tag = lbl ? `<span class="wtag known">${esc(lbl)}</span>`
+      : (r ? (r.fresh ? `<span class="wtag fresh">fresh</span>` : (r.trader ? `<span class="wtag trader">trader</span>` : "")) : "");
     return `<div class="bar-row ${x.pct >= 25 ? "whale" : ""}"><span class="addr">#${i + 1} <a href="https://solscan.io/account/${x.owner}" target="_blank" rel="noopener">${short(x.owner)}</a> ${tag}</span>` +
     `<span class="bar-track"><span class="bar-fill" data-w="${(x.pct / max * 100).toFixed(1)}"></span></span>` +
     `<span class="pct">${x.pct.toFixed(1)}%</span></div>`;
@@ -284,18 +288,21 @@ function watcherFace(mood) {
 }
 function setWatcher(el, mood) { if (el) el.innerHTML = watcherFace(mood); }
 
-function renderMarket(m, flow) {
+function renderMarket(m, flow, overview) {
   if (!m || !Object.keys(m).length) { $("#metrics").innerHTML = `<span class="muted-note">No DEX market found.</span>`; $("#flow").innerHTML = ""; return; }
   const chg = m.price_change_h24;
   const chgCls = chg == null ? "" : chg >= 0 ? "up" : "down";
+  const ov = overview || {};
+  const lp = ov.lp_locked_pct;
+  const lpCell = lp == null ? "—" : `<span class="${lp >= 90 ? "up" : lp < 50 ? "down" : ""}">${lp.toFixed(1)}%${lp >= 90 ? " 🔒" : ""}</span>`;
   $("#metrics").innerHTML = [
     ["Liquidity", usd(m.liquidity_usd)],
     ["Market cap", usd(m.market_cap)],
     ["24h volume", usd(m.volume_24h)],
     ["Pair age", age(m.age_minutes)],
-    ["Price", usd(m.price_usd)],
-    ["24h change", `<span class="${chgCls}">${chg == null ? "—" : (chg >= 0 ? "+" : "") + chg.toFixed(1) + "%"}</span>`],
-  ].map(([k, v]) => `<div class="metric"><div class="k">${k}</div><div class="v ${k === "24h change" ? "" : ""}">${v}</div></div>`).join("");
+    ["LP locked", lpCell],
+    ["Markets", ov.markets != null ? num(ov.markets) : "—"],
+  ].map(([k, v]) => `<div class="metric"><div class="k">${k}</div><div class="v">${v}</div></div>`).join("");
 
   const b = flow.buyers_h24, s = flow.sellers_h24;
   if (b != null && s != null && b + s > 0) {
@@ -303,6 +310,20 @@ function renderMarket(m, flow) {
     $("#flow").innerHTML = `<div class="flabel"><span>${num(b)} buyers</span><span>${num(s)} sellers (24h)</span></div>` +
       `<div class="flow-track"><span class="flow-buy" style="width:${buyPct}%"></span></div>`;
   } else $("#flow").innerHTML = "";
+}
+
+function renderInsiderNetworks(nets) {
+  const panel = $("#insiderPanel");
+  if (!nets || !nets.length) { panel.hidden = true; return; }
+  panel.hidden = false;
+  $("#insiderBody").innerHTML =
+    `<div class="muted-note" style="margin-bottom:10px">Groups of wallets that move tokens together — coordinated/insider clusters (per RugCheck's graph). A big cluster holding a large % is a manipulation tell.</div>` +
+    `<table class="net-tbl"><tr><th>cluster</th><th>wallets</th><th>% supply</th></tr>` +
+    nets.map((n) => {
+      const big = (n.pct || 0) >= 10;
+      return `<tr><td><code>${esc(n.id)}</code></td><td>${num(n.accounts)}</td>` +
+        `<td class="${big ? "neg" : ""}">${n.pct != null ? n.pct.toFixed(2) + "%" : "—"}</td></tr>`;
+    }).join("") + `</table>`;
 }
 
 function renderSources(sources, hp) {

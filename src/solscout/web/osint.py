@@ -111,6 +111,15 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
     else:
         out["deployer"] = {"wallet": None}
 
+    # — dev current holdings → "sold" / "holds X%" (RugCheck creatorBalance vs on-chain supply, ADR-043) —
+    if rc_rep and rc_rep.available and rc_rep.creator_balance is not None and out["deployer"].get("wallet"):
+        supply = a.mint_info.supply if a.mint_info else 0
+        pct = round(100 * rc_rep.creator_balance / supply, 2) if supply else None
+        out["deployer"]["dev_holdings_pct"] = pct
+        out["deployer"]["dev_sold"] = (rc_rep.creator_balance == 0)
+        if pct is not None and pct > 15:
+            out["flags"].append("dev_holds_large")
+
     # — Top buyers' wallet history (fresh-wallet / insider cluster) —
     dist = (a.top_holders or [])[: cfg.deployer.holders_intel_top_n]
     if dist and cfg.deployer.enabled and helius_on:
@@ -130,9 +139,35 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
         if fresh >= cfg.deployer.fresh_buyer_min:
             out["flags"].append("fresh_buyer_cluster")
 
+    # — token overview + LP lock + markets (ADR-043: surface what RugCheck already gave us) —
+    if rc_rep and rc_rep.available:
+        supply = a.mint_info.supply if a.mint_info else None
+        decimals = a.mint_info.decimals if a.mint_info else 0
+        out["overview"] = {
+            "supply": (supply / (10 ** decimals)) if supply and decimals else supply,
+            "lp_locked_pct": rc_rep.lp_locked_pct,
+            "total_lp_providers": rc_rep.total_lp_providers,
+            "markets": rc_rep.markets_count,
+            "total_liquidity": rc_rep.total_market_liquidity,
+        }
+        if rc_rep.lp_locked_pct is not None and rc_rep.lp_locked_pct < 50:
+            out["flags"].append("lp_unlocked")
+        # — Insider Networks (named clusters — the distinctive Bubblemaps-style panel) —
+        if rc_rep.insider_networks:
+            tot = supply or 1
+            out["insider_networks"] = [
+                {"id": n["id"], "accounts": n["size"],
+                 "pct": round(100 * n["token_amount"] / tot, 2) if tot else None}
+                for n in rc_rep.insider_networks
+            ]
+        # — known-account labels for the holder bars (Pump.fun AMM, Streamflow Vault, Raydium, …) —
+        if rc_rep.known_accounts:
+            out["labels"] = {k: v for k, v in rc_rep.known_accounts.items() if v}
+
     # — Source consensus —
     out["sources"] = {
         "rugcheck": ({"available": True, "score": rc_rep.score, "rugged": rc_rep.rugged,
+                      "lp_locked_pct": rc_rep.lp_locked_pct, "total_lp_providers": rc_rep.total_lp_providers,
                       "risks": [n for (n, lvl, _s) in rc_rep.risks if lvl == "danger"][:6]}
                      if rc_rep and rc_rep.available else {"available": False}),
         "goplus": ({"available": True, "trusted": gp_rep.trusted, "risks": gp_rep.risks,

@@ -30,6 +30,13 @@ class RugCheckReport:
     creator: str | None = None  # deployer wallet (ADR-041) — for deep deployer forensics
     creator_tokens: int | None = None  # how many tokens this creator has launched (per RugCheck)
     risks: list[tuple[str, str, int]] = field(default_factory=list)  # (name, level, score)
+    # ADR-043 — richer overview surface (data already in /report; we just surface it now)
+    creator_balance: int | None = None  # dev's CURRENT token holdings (raw) → "dev sold" / "dev holds X%"
+    total_lp_providers: int | None = None
+    markets_count: int | None = None
+    total_market_liquidity: float | None = None
+    insider_networks: list[dict] = field(default_factory=list)  # [{id, size, token_amount}] — the Bubblemaps-style clusters
+    known_accounts: dict[str, str] = field(default_factory=dict)  # address -> label (e.g. "Pump.fun AMM")
 
     def danger_risks(self) -> list[str]:
         return [n for (n, lvl, _s) in self.risks if lvl == "danger"]
@@ -55,6 +62,11 @@ class RugCheckClient(BaseClient):
             if isinstance(r, dict)
         ]
         ctoks = d.get("creatorTokens")
+        # LP-lock lives per-market in markets[].lp.lpLockedPct — take the best (deepest pool's) lock
+        markets = d.get("markets") or []
+        lp_top = _f(d.get("lpLockedPct"))
+        lp_market = max((_f(((m.get("lp") or {}).get("lpLockedPct"))) or 0 for m in markets if isinstance(m, dict)), default=0)
+        ka = d.get("knownAccounts") or {}
         return RugCheckReport(
             mint=mint,
             available=True,
@@ -62,9 +74,19 @@ class RugCheckClient(BaseClient):
             score=int(d.get("score_normalised") or 0),
             total_holders=_i(d.get("totalHolders")),
             insider_holders=sum(1 for h in top if isinstance(h, dict) and h.get("insider")),
-            lp_locked_pct=_f(d.get("lpLockedPct")),
+            lp_locked_pct=(lp_top if lp_top else (lp_market or None)),
             creator=d.get("creator") or None,
             creator_tokens=(len(ctoks) if isinstance(ctoks, list) else _i(ctoks)),
+            creator_balance=_i(d.get("creatorBalance")),
+            total_lp_providers=_i(d.get("totalLPProviders")),
+            markets_count=len(markets) or None,
+            total_market_liquidity=_f(d.get("totalMarketLiquidity")),
+            insider_networks=[
+                {"id": str(n.get("id") or "?"), "size": _i(n.get("size")) or 0, "token_amount": _i(n.get("tokenAmount")) or 0}
+                for n in (d.get("insiderNetworks") or []) if isinstance(n, dict)
+            ][:8],
+            known_accounts={k: (v.get("name") or v.get("type") or "") for k, v in ka.items()
+                            if isinstance(v, dict)} if isinstance(ka, dict) else {},
             risks=risks,
         )
 
