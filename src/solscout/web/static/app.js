@@ -52,7 +52,7 @@ function syncUrl(mint) {
   try { history.replaceState(null, "", mint ? `/?mint=${mint}` : "/"); } catch { /* ignore */ }
 }
 window.addEventListener("DOMContentLoaded", () => {
-  setDoakes($("#heroFace"), "watch");  // the watcher idles on the hero, eyes scanning
+  setWatcher($("#heroFace"), "watch");  // the watcher idles on the hero
   const m = new URLSearchParams(location.search).get("mint");
   if (m) { $("#mintInput").value = m; run(m); }
 });
@@ -137,8 +137,8 @@ function render(d) {
   // gauge
   setGauge(d.score);
 
-  // Doakes reacts to the verdict — glares at rugs, eases up on clean coins
-  setDoakes($("#doakesReaction"), LEVEL_MOOD[d.level] || "squint");
+  // the watcher reacts to the verdict — glares at rugs, eases up on clean coins
+  setWatcher($("#watcherReaction"), LEVEL_MOOD[d.level] || "watch");
 
   // checks
   $("#checkMeta").textContent = `${c.total} checks · ${d.meta.took_ms ?? "?"}ms${d.cached ? " · cached" : ""}`;
@@ -262,35 +262,27 @@ function renderTwitter(tw) {
 
 function _compact(v) { if (v == null) return "—"; if (v < 1000) return "" + v; if (v < 1e6) return (v / 1e3).toFixed(1) + "K"; return (v / 1e6).toFixed(1) + "M"; }
 
-/* ---------- Doakes: the watcher (reactive face, James Doakes homage) ---------- */
-const LEVEL_MOOD = { CRITICAL: "glare", DANGER: "glare", CAUTION: "squint", SAFE: "content" };
+/* ---------- the watcher (reactive meme face) ---------- */
+// glare on bad verdicts, the calmer watch face otherwise. Real gif first; an SVG silhouette is the fallback
+// if the gif is ever missing (404 → onerror swaps it in). currentColor inherits the theme --verdict tint.
+const LEVEL_MOOD = { CRITICAL: "glare", DANGER: "glare", CAUTION: "watch", SAFE: "watch" };
+const _GIF = { glare: "glare", watch: "watch", squint: "watch", content: "watch" };
 const HEAD = "M22 28 Q22 13 40 13 L60 13 Q78 13 78 28 L78 55 Q78 85 50 92 Q22 85 22 55 Z";
-const FACE = {
-  // brows / eyes / mouth per mood — stroke uses currentColor (theme --verdict)
-  glare: `<path d="M20 35 L44 43"/><path d="M80 35 L56 43"/>
-    <path d="M27 52 L41 52" stroke-width="5"/><path d="M59 52 L73 52" stroke-width="5"/>
-    <path d="M33 74 Q50 64 67 74"/>`,
-  squint: `<path d="M22 37 L44 37"/><path d="M56 34 L78 30"/>
-    <path d="M28 51 L40 51" stroke-width="4"/><circle cx="66" cy="50" r="3.4" fill="currentColor" stroke="none"/>
-    <path d="M35 72 Q50 70 65 74"/>`,
-  content: `<path d="M22 37 Q34 32 45 36"/><path d="M55 36 Q66 32 78 37"/>
-    <circle cx="35" cy="49" r="3.4" fill="currentColor" stroke="none"/><circle cx="65" cy="49" r="3.4" fill="currentColor" stroke="none"/>
-    <path d="M34 70 Q50 79 66 70"/>`,
-  watch: `<path d="M22 36 L44 36"/><path d="M56 36 L78 36"/>
-    <circle cx="35" cy="50" r="6" fill="none"/><circle cx="65" cy="50" r="6" fill="none"/>
-    <circle class="pupil" cx="35" cy="50" r="2.6" fill="currentColor" stroke="none"/>
-    <circle class="pupil" cx="65" cy="50" r="2.6" fill="currentColor" stroke="none"/>
-    <path d="M34 73 L66 73"/>`,
-};
-function doakesFace(mood) {
-  const inner = FACE[mood] || FACE.watch;
-  // optional real-GIF override: drop static/doakes/<mood>.gif and it covers the SVG; 404 → onerror hides it
-  return `<img class="doakes-gif" alt="" src="/static/doakes/${mood}.gif" onerror="this.remove()"/>` +
-    `<svg class="doakes-svg ${mood}" viewBox="0 0 100 100" fill="none" stroke="currentColor" ` +
-    `stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">` +
-    `<path class="head" d="${HEAD}" stroke-width="2.4" opacity=".55"/>${inner}</svg>`;
+const _FALLBACK_SVG = (mood) =>
+  `<svg class="watcher-svg ${mood}" viewBox="0 0 100 100" fill="none" stroke="currentColor" ` +
+  `stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">` +
+  `<path class="head" d="${HEAD}" stroke-width="2.4" opacity=".55"/>` +
+  (mood === "glare"
+    ? `<path d="M20 35 L44 43"/><path d="M80 35 L56 43"/><path d="M27 52 L41 52" stroke-width="5"/><path d="M59 52 L73 52" stroke-width="5"/><path d="M33 74 Q50 64 67 74"/>`
+    : `<path d="M22 36 L44 36"/><path d="M56 36 L78 36"/><circle cx="35" cy="50" r="2.8" fill="currentColor" stroke="none"/><circle cx="65" cy="50" r="2.8" fill="currentColor" stroke="none"/><path d="M34 72 L66 72"/>`) +
+  `</svg>`;
+function watcherFace(mood) {
+  const gif = _GIF[mood] || "watch";
+  const svg = _FALLBACK_SVG(mood === "glare" ? "glare" : "watch").replace(/"/g, "&quot;");
+  return `<img class="watcher-gif ${mood}" alt="" src="/static/watcher/${gif}.gif" ` +
+    `onerror="this.outerHTML='${svg}'"/>`;
 }
-function setDoakes(el, mood) { if (el) el.innerHTML = doakesFace(mood); }
+function setWatcher(el, mood) { if (el) el.innerHTML = watcherFace(mood); }
 
 function renderMarket(m, flow) {
   if (!m || !Object.keys(m).length) { $("#metrics").innerHTML = `<span class="muted-note">No DEX market found.</span>`; $("#flow").innerHTML = ""; return; }
@@ -350,6 +342,6 @@ function renderAI(ai) {
   const via = ai.model ? `via ${esc(ai.model)}` : (ai.provider === "rules" ? "rule-based (model offline)" : "");
   el.innerHTML =
     `<div class="note">${esc(ai.summary)}</div>` +
-    (ai.doakes ? `<div class="doakes-quote">“${esc(ai.doakes)}”<span class="doakes-by">— Sgt. Doakes</span></div>` : "") +
+    (ai.quip ? `<div class="watcher-quote">“${esc(ai.quip)}”<span class="watcher-by">— the watcher</span></div>` : "") +
     `<div class="muted-note" style="margin-top:12px">Reasons over the full forensic report ${via ? "· " + via : ""}. One signal — never the verdict. Not financial advice.</div>`;
 }

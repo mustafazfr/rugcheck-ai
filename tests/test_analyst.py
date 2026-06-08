@@ -6,7 +6,7 @@ from solscout.llm.analyst import (
     _facts,
     _fallback_summary,
     _san,
-    doakes_line,
+    watcher_line,
 )
 
 
@@ -78,12 +78,12 @@ def test_fallback_clean():
     assert "No red flags" in s and "SAFE" in s
 
 
-# — Doakes voice lines —
+# — watcher voice lines —
 
-def test_doakes_per_level():
-    assert "real you" in doakes_line("CRITICAL")
-    assert doakes_line("SAFE") != doakes_line("DANGER")
-    assert doakes_line("???")  # unknown level → a default line, never empty
+def test_watcher_line_per_level():
+    assert "real you" in watcher_line("CRITICAL")
+    assert watcher_line("SAFE") != watcher_line("DANGER")
+    assert watcher_line("???")  # unknown level → a default line, never empty
 
 
 # — tightened fresh-wallet definition (ADR-042): AND, not OR —

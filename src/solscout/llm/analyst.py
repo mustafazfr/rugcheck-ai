@@ -7,7 +7,7 @@ GoPlus risks, Twitter authenticity, holder concentration) and asks for a verdict
 findings. Free + local (Ollama). Tries a bigger model first (`analyst_model`), falls back to
 `synthesis_model`, then to a deterministic rule-built summary if Ollama is unreachable — never blocks.
 
-Pure helpers (`_facts`, `_fallback_summary`, `doakes_line`) are unit-tested; the network call is best-effort.
+Pure helpers (`_facts`, `_fallback_summary`, `watcher_line`) are unit-tested; the network call is best-effort.
 """
 
 from __future__ import annotations
@@ -49,9 +49,9 @@ def _data(v, cap: int = 80) -> str:
     """Wrap an untrusted value in a <data> fence the system prompt is told to never obey."""
     return f"<data>{_san(v, cap)}</data>"
 
-# Deterministic in-character one-liners (James Doakes — "I see the real you"). Always present, even if the
-# LLM is down; the analyst paragraph carries the analysis, these carry the humor (ADR-042).
-_DOAKES = {
+# Deterministic in-character one-liners for "the watcher" — the meme face that sees a coin's real identity.
+# Always present even if the LLM is down; the analyst paragraph carries the analysis, these carry the humor.
+_QUIPS = {
     "CRITICAL": "Surprise, motherf*****. I see the real you — this one's a trap.",
     "DANGER": "I'm watching you, and you're up to something. Don't.",
     "CAUTION": "Something's off about you. I've got my eye on this one.",
@@ -59,8 +59,8 @@ _DOAKES = {
 }
 
 
-def doakes_line(level: str) -> str:
-    return _DOAKES.get(level, _DOAKES["CAUTION"])
+def watcher_line(level: str) -> str:
+    return _QUIPS.get(level, _QUIPS["CAUTION"])
 
 
 def _checks_by(report: dict, status: str) -> list[str]:
@@ -149,9 +149,9 @@ def _fallback_summary(report: dict) -> str:
 
 
 async def analyze_report(report: dict, cfg) -> dict:
-    """Best-effort local-LLM verdict over the full report. Returns {summary, provider, model, doakes}."""
+    """Best-effort local-LLM verdict over the full report. Returns {summary, provider, model, quip}."""
     level = report.get("level") or "CAUTION"
-    out = {"summary": _fallback_summary(report), "provider": "rules", "model": None, "doakes": doakes_line(level)}
+    out = {"summary": _fallback_summary(report), "provider": "rules", "model": None, "quip": watcher_line(level)}
     facts = _facts(report)
     try:
         import ollama
