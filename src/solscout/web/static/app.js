@@ -301,9 +301,11 @@ const LEVEL_MOOD = { CRITICAL: "rugged", DANGER: "risky", CAUTION: "risky", SAFE
 // per-face media + how long to keep it on screen before it gently fades out (≈2–3 plays of that clip, then a
 // soft CSS opacity fade — not an abrupt cut). `safe` has no file yet (the user is supplying the clean "okay"
 // face) → it renders the calm line-art silhouette below and just stays. Add safe here with a file to use it.
+// MP4 video, not GIF — full colour, no 256-colour banding, sharper, smaller. Autoplay-muted-loop renders
+// like a gif but at much higher quality. holdMs ≈ 2–3 plays of that clip before the soft fade.
 const _FACE = {
-  rugged: { file: "rugged.gif", holdMs: 12700 },  // 6.34s clip × ~2 plays
-  risky:  { file: "risky.gif",  holdMs: 8300 },   // 2.77s clip × ~3 plays
+  rugged: { file: "rugged.mp4", holdMs: 12700 },  // 6.33s clip × ~2 plays
+  risky:  { file: "risky.mp4",  holdMs: 8200 },   // 2.73s clip × ~3 plays
 };
 const _WATCHER_FADE_MS = 1500;  // must match .watcher-corner transition in styles.css
 const HEAD = "M22 28 Q22 13 40 13 L60 13 Q78 13 78 28 L78 55 Q78 85 50 92 Q22 85 22 55 Z";
@@ -322,8 +324,8 @@ function watcherFace(mood) {
   // so there's no broken/404 request. A real file, when present, falls back to the same SVG on load error.
   if (!f) return _FALLBACK_SVG(hostile ? "glare" : "watch");
   const svg = _FALLBACK_SVG(hostile ? "glare" : "watch").replace(/"/g, "&quot;");
-  return `<img class="watcher-gif ${mood}" alt="" src="/static/watcher/${f.file}" ` +
-    `onerror="this.outerHTML='${svg}'"/>`;
+  return `<video class="watcher-gif ${mood}" autoplay loop muted playsinline ` +
+    `src="/static/watcher/${f.file}" onerror="this.outerHTML='${svg}'"></video>`;
 }
 // generation token so a fresh scan cancels a pending fade/clear from the previous one
 let _watcherGen = 0;

@@ -279,7 +279,7 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .watcher-svg.glare{animation:glare-shudder 2.6s ease-in-out infinite}
 @keyframes glare-shudder{0%,100%{transform:none}3%{transform:translateX(-1px)}6%{transform:translateX(1px)}9%{transform:none}}
 /* verdict-corner reaction: top-right of the verdict card. glare gets a red ring, clean gets a lime ring */
-.watcher-corner{position:absolute;top:14px;right:16px;width:172px;height:146px;z-index:2;pointer-events:none;
+.watcher-corner{position:absolute;top:14px;right:16px;width:212px;height:178px;z-index:2;pointer-events:none;
   opacity:1;transition:opacity 1.5s ease}
 .watcher-corner.faded{opacity:0}  /* after ~2–3 plays the JS adds this → soft fade-out, not an abrupt cut */
 .watcher-corner .watcher-gif{border-color:var(--verdict);filter:brightness(1.16) contrast(1.06) saturate(1.05);
