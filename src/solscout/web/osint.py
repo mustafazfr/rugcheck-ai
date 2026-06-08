@@ -14,6 +14,7 @@ degrades to "unavailable" without breaking the report. Returns a dict folded int
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from ..core.logging import get_logger
@@ -90,9 +91,30 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
     gp_rep = await _safe(gp.token_security(a.mint), "goplus") if gp else None
     creator = rc_rep.creator if (rc_rep and rc_rep.available) else None
 
+    # — Deployer + top-buyer history is the heaviest part: ≈1 + N Helius enhanced-tx calls. These used to run
+    #   one-by-one (~17s+ on a fresh token, the bulk of the old ~50s wait). Launch them ALL concurrently up
+    #   front — the client still staggers request *starts* by 120ms, but the round-trips overlap (ADR-044). —
+    dep_task = (
+        asyncio.create_task(_safe(helius.address_transactions(creator, limit=cfg.deployer.tx_limit), "deployer-txns"))
+        if (creator and cfg.deployer.enabled and helius_on) else None
+    )
+    dist = (a.top_holders or [])[: cfg.deployer.holders_intel_top_n]
+
+    async def _profile_holder(h):
+        owner = h.get("owner")
+        txs = await _safe(helius.address_transactions(owner, limit=cfg.deployer.holder_tx_limit), "holder-txns") or []
+        s = wallet_swap_summary(txs)
+        return h, s, is_fresh_wallet(s), looks_like_trader(s)
+
+    # gather() already schedules each profile as a Task (they run concurrently); just await it later.
+    buyers_task = (
+        asyncio.gather(*(_profile_holder(h) for h in dist))
+        if (dist and cfg.deployer.enabled and helius_on) else None
+    )
+
     # — Deployer / creator forensics —
-    if creator and cfg.deployer.enabled and helius_on:
-        txs = await _safe(helius.address_transactions(creator, limit=cfg.deployer.tx_limit), "deployer-txns") or []
+    if dep_task is not None:
+        txs = await dep_task or []
         prior = count_prior_creations(txs)
         serial = prior >= cfg.deployer.serial_creator_min
         out["deployer"] = {
@@ -121,18 +143,13 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
             out["flags"].append("dev_holds_large")
 
     # — Top buyers' wallet history (fresh-wallet / insider cluster) —
-    dist = (a.top_holders or [])[: cfg.deployer.holders_intel_top_n]
-    if dist and cfg.deployer.enabled and helius_on:
+    if buyers_task is not None:
         rows, fresh, traders = [], 0, 0
-        for h in dist:
-            owner = h.get("owner")
-            txs = await _safe(helius.address_transactions(owner, limit=cfg.deployer.holder_tx_limit), "holder-txns") or []
-            s = wallet_swap_summary(txs)
-            f, t = is_fresh_wallet(s), looks_like_trader(s)
+        for h, s, f, t in await buyers_task:
             fresh += f
             traders += t
             rows.append({
-                "owner": owner, "pct": h.get("pct"), "fresh": f, "trader": t,
+                "owner": h.get("owner"), "pct": h.get("pct"), "fresh": f, "trader": t,
                 "swaps": s["swaps_total"], "tokens": s["distinct_tokens"], "net_sol": s["net_sol"],
             })
         out["holders_intel"] = {"profiled": len(rows), "fresh": fresh, "traders": traders, "rows": rows}
