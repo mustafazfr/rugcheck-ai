@@ -25,6 +25,8 @@ llm:
   host: "http://localhost:11434"
   synthesis_model: "qwen2.5:latest"
   classify_model: "llama3.2:3b"
+  analyst_model: "qwen2.5:14b"   # ADR-042: web AI analyst (reasons over the FULL report); bigger = better.
+                                 # `ollama pull qwen2.5:14b`. Falls back to synthesis_model if not present.
   request_timeout_s: 60
   fail_open_to_rules: true     # if Ollama is unreachable, run rule-only (drop narrative weight)
 
