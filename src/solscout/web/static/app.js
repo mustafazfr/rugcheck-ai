@@ -305,15 +305,10 @@ function renderSources(sources, hp) {
 
 function renderAI(ai) {
   const el = $("#aiBody");
-  if (!ai) { el.innerHTML = `<span class="muted-note">AI analyst skipped (token rejected before LLM, or Ollama offline).</span>`; return; }
-  const pct = (v) => Math.round((v || 0) * 100);
+  if (!ai || !ai.summary) { el.innerHTML = `<span class="muted-note">AI analyst unavailable (local model offline).</span>`; return; }
+  const via = ai.model ? `via ${esc(ai.model)}` : (ai.provider === "rules" ? "rule-based (model offline)" : "");
   el.innerHTML =
-    `<div class="note">${esc(ai.summary || "No commentary.")}</div>` +
-    `<div class="meters">` +
-    `<div class="mtr"><div class="k"><span>narrative</span><span>${pct(ai.narrative_strength)}</span></div><div class="t"><div class="f" data-w="${pct(ai.narrative_strength)}"></div></div></div>` +
-    `<div class="mtr"><div class="k"><span>authenticity</span><span>${pct(ai.community_authenticity)}</span></div><div class="t"><div class="f" data-w="${pct(ai.community_authenticity)}"></div></div></div>` +
-    `</div>` +
-    ((ai.scam_flags || []).length ? `<div class="flags">${ai.scam_flags.map((f) => `<span class="flag">⚑ ${esc(f)}</span>`).join("")}</div>` : "") +
-    `<div class="muted-note" style="margin-top:12px">AI reads narrative &amp; scam-language only — one weighted signal, never the verdict.</div>`;
-  requestAnimationFrame(() => $$("#aiBody .f").forEach((f) => f.style.width = f.dataset.w + "%"));
+    `<div class="note">${esc(ai.summary)}</div>` +
+    (ai.doakes ? `<div class="doakes-quote">“${esc(ai.doakes)}”<span class="doakes-by">— Sgt. Doakes</span></div>` : "") +
+    `<div class="muted-note" style="margin-top:12px">Reasons over the full forensic report ${via ? "· " + via : ""}. One signal — never the verdict. Not financial advice.</div>`;
 }

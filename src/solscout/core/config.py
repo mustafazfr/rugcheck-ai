@@ -33,6 +33,9 @@ class LlmCfg(BaseModel):
     host: str = "http://localhost:11434"
     synthesis_model: str = "qwen2.5:latest"
     classify_model: str = "llama3.2:3b"
+    # ADR-042: the web "AI analyst" reasons over the FULL forensic report. A bigger local model gives much
+    # better verdicts; we try `analyst_model` first and fall back to `synthesis_model` if it isn't pulled.
+    analyst_model: str = "qwen2.5:14b"
     request_timeout_s: int = 60
     fail_open_to_rules: bool = True
 

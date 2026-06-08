@@ -123,6 +123,7 @@ async def analyze(
     gecko=None,
     rc=None,
     gp=None,
+    skip_llm: bool = False,
 ) -> Analysis:
     # CREDIT DIET (ADR-020): fetch the cheap signals first (DexScreener=free, mint_info=cheap public RPC).
     # If the token isn't indexed yet (PENDING), return WITHOUT the expensive DAS holders call / social /
@@ -270,7 +271,7 @@ async def analyze(
     # RICH LLM analysis — runs for every coin that PASSED the hard rug filters (don't waste Qwen on rejects).
     # Feeds the whole signal set (on-chain + market + Twitter/Telegram + chatter) → a human commentary.
     llm = None
-    if filt.passed and market:
+    if filt.passed and market and not skip_llm:  # web skips this; the rich web/analyst does the LLM pass
         ctx = {
             "name": market.name,
             "symbol": market.symbol,

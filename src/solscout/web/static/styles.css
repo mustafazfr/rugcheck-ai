@@ -218,6 +218,9 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .ai .flags{margin-top:12px;display:flex;gap:7px;flex-wrap:wrap}
 .ai .flag{font-size:11px;color:var(--red);border:1px solid rgba(255,77,87,.35);background:rgba(255,77,87,.08);padding:3px 9px;border-radius:6px}
 .muted-note{color:var(--faint);font-size:12px}
+.doakes-quote{margin-top:12px;font-family:var(--disp);font-size:13.5px;font-style:italic;color:var(--verdict);
+  border-left:2px solid var(--verdict);padding:6px 0 6px 12px;line-height:1.45}
+.doakes-by{display:block;font-style:normal;font-size:10px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-top:4px}
 
 /* deployer / wallet id */
 .wallet-id{display:flex;align-items:center;gap:12px;margin-bottom:14px}

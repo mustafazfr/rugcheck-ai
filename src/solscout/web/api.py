@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import pipeline
 from ..core.config import load
+from ..llm import analyst
 from ..core.credits import CreditGovernor, month_key
 from ..core.db import Db
 from ..core.logging import get_logger
@@ -118,18 +119,20 @@ async def check(mint: str, refresh: bool = False):
             watchlist = await db.list_wallets()
         a = await pipeline.analyze(
             mint, cfg, dex=c["dex"], rpc=c["rpc"], helius=c["helius"], tg=c["tg"], ts=c["ts"],
-            jup=c["jup"], gecko=c["gecko"], rc=c["rc"], gp=c["gp"], watchlist=watchlist,
+            jup=c["jup"], gecko=c["gecko"], rc=c["rc"], gp=c["gp"], watchlist=watchlist, skip_llm=True,
         )
         # deep OSINT (twitter + deployer + buyer wallets + source consensus) — best-effort, never fatal
         osint = await osint_mod.gather(a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"]) or {}
+        report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
+        # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is
+        # assembled so the model cites the actual findings, not just name+market. Free + local; best-effort.
+        report["ai"] = await analyst.analyze_report(report, cfg.llm)
     except Exception as e:  # never 500 the user — return a graceful error report
         log.warning("check %s failed: %s", mint[:8], e)
         return JSONResponse(
             {"error": "analysis_failed", "detail": "Could not analyze this token right now.", "mint": mint},
             status_code=502,
         )
-
-    report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
     cache[mint] = (time.monotonic(), report)
     return {**report, "cached": False}
 
