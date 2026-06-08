@@ -138,13 +138,23 @@ async def check(mint: str, refresh: bool = False):
 
 
 # — static frontend —
+# `no-cache` = the browser MUST revalidate before reusing a cached asset. With the ETag already sent, an
+# unchanged file still returns a cheap 304 (no re-download), but an EDITED css/js/gif shows up immediately on
+# a normal refresh — no more stale-cache confusion where a change "didn't take" until a hard reload.
+class _NoCacheStatic(StaticFiles):
+    async def get_response(self, path, scope):
+        resp = await super().get_response(path, scope)
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+
 if STATIC.exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC)), name="static")
+    app.mount("/static", _NoCacheStatic(directory=str(STATIC)), name="static")
 
 
 @app.get("/")
 async def index():
     f = STATIC / "index.html"
     if f.exists():
-        return FileResponse(str(f))
+        return FileResponse(str(f), headers={"Cache-Control": "no-cache"})
     return JSONResponse({"service": "rugcheck.ai", "hint": "frontend not built"}, status_code=200)
