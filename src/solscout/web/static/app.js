@@ -52,6 +52,7 @@ function syncUrl(mint) {
   try { history.replaceState(null, "", mint ? `/?mint=${mint}` : "/"); } catch { /* ignore */ }
 }
 window.addEventListener("DOMContentLoaded", () => {
+  setDoakes($("#heroFace"), "watch");  // the watcher idles on the hero, eyes scanning
   const m = new URLSearchParams(location.search).get("mint");
   if (m) { $("#mintInput").value = m; run(m); }
 });
@@ -135,6 +136,9 @@ function render(d) {
 
   // gauge
   setGauge(d.score);
+
+  // Doakes reacts to the verdict — glares at rugs, eases up on clean coins
+  setDoakes($("#doakesReaction"), LEVEL_MOOD[d.level] || "squint");
 
   // checks
   $("#checkMeta").textContent = `${c.total} checks · ${d.meta.took_ms ?? "?"}ms${d.cached ? " · cached" : ""}`;
