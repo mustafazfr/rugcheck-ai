@@ -150,7 +150,8 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
             "markets": rc_rep.markets_count,
             "total_liquidity": rc_rep.total_market_liquidity,
         }
-        if rc_rep.lp_locked_pct is not None and rc_rep.lp_locked_pct < 50:
+        # only a soft nudge, and only when LP-lock was actually MEASURABLE and clearly low (ADR-043)
+        if rc_rep.lp_locked_pct is not None and rc_rep.lp_locked_pct < 25:
             out["flags"].append("lp_unlocked")
         # — Insider Networks (named clusters — the distinctive Bubblemaps-style panel) —
         if rc_rep.insider_networks:

@@ -48,10 +48,13 @@ DANGER_FLAGS = {
     "fresh_buyer_cluster",
     "twitter_inauthentic",
 }
-DANGER_FLAGS |= {"lp_unlocked"}  # ADR-043: LP not locked → dev can pull liquidity
 SOFT_FLAGS = {
     "high_turnover", "txn_imbalance", "low_float", "rugcheck_elevated", "llm_rug",
     "goplus_closable", "goplus_mutable_metadata", "twitter_weak", "no_twitter", "dev_holds_large",
+    # LP-lock is informational only (ADR-043): many legit multi-AMM tokens (BONK) show low measured lock
+    # because pools don't all use a lock script. RugCheck's aggregate score/`rugged` is the real LP authority,
+    # so an unlocked-LP reading is a soft nudge, never a hard DANGER veto that overrides a clean RugCheck.
+    "lp_unlocked",
 }
 
 LEVELS = ("SAFE", "CAUTION", "DANGER", "CRITICAL")
@@ -325,13 +328,14 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
             out.append(_check("dev_hold", "Dev not over-holding supply", "Creator / deployer",
                               "warn" if has("dev_holds_large") else "pass", detail))
 
-    # — LP lock (ADR-043) —
+    # — LP lock (ADR-043) — informational; warn (not fail) on a measurably-low lock, skip when unmeasurable —
     ov = (osint.get("overview") or {})
     if ov.get("lp_locked_pct") is not None:
         lp = ov["lp_locked_pct"]
-        out.append(_check("lp_lock", "Liquidity is locked", "Liquidity",
-                          "fail" if has("lp_unlocked") else "pass",
-                          f"LP locked {lp:.1f}%" + (f" · {ov.get('total_lp_providers')} LP providers" if ov.get('total_lp_providers') else "")))
+        provs = f" · {ov.get('total_lp_providers')} LP providers" if ov.get("total_lp_providers") else ""
+        out.append(_check("lp_lock", "Liquidity lock", "Liquidity",
+                          "warn" if has("lp_unlocked") else "pass",
+                          f"LP locked {lp:.1f}% (measured across pools){provs}"))
 
     # — Buyers' wallets (ADR-041) —
     hi = (osint.get("holders_intel") or {})

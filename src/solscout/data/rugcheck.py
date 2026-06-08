@@ -62,10 +62,14 @@ class RugCheckClient(BaseClient):
             if isinstance(r, dict)
         ]
         ctoks = d.get("creatorTokens")
-        # LP-lock lives per-market in markets[].lp.lpLockedPct — take the best (deepest pool's) lock
         markets = d.get("markets") or []
         lp_top = _f(d.get("lpLockedPct"))
-        lp_market = max((_f(((m.get("lp") or {}).get("lpLockedPct"))) or 0 for m in markets if isinstance(m, dict)), default=0)
+        # LP-lock is per-market; a SINGLE unlocked deep pool is the rug vector (dev pulls liquidity there), so
+        # a naive max() ("best pool") would hide it. Compute a LIQUIDITY-WEIGHTED lock across pools instead —
+        # an unlocked deep pool drags the number down. Fall back to the global field; `is not None` (not a
+        # truthiness check) so a real 0% lock isn't silently overridden (security review).
+        lp_weighted = _weighted_lp_lock(markets)
+        lp_locked = lp_top if lp_top is not None else lp_weighted
         ka = d.get("knownAccounts") or {}
         return RugCheckReport(
             mint=mint,
@@ -74,7 +78,7 @@ class RugCheckClient(BaseClient):
             score=int(d.get("score_normalised") or 0),
             total_holders=_i(d.get("totalHolders")),
             insider_holders=sum(1 for h in top if isinstance(h, dict) and h.get("insider")),
-            lp_locked_pct=(lp_top if lp_top else (lp_market or None)),
+            lp_locked_pct=lp_locked,
             creator=d.get("creator") or None,
             creator_tokens=(len(ctoks) if isinstance(ctoks, list) else _i(ctoks)),
             creator_balance=_i(d.get("creatorBalance")),
@@ -89,6 +93,37 @@ class RugCheckClient(BaseClient):
                             if isinstance(v, dict)} if isinstance(ka, dict) else {},
             risks=risks,
         )
+
+
+def _weighted_lp_lock(markets: list) -> float | None:
+    """Liquidity-weighted LP-lock % across pools (ADR-043 security fix). Each pool's lock is weighted by its
+    USD liquidity so a deep UNLOCKED pool drags the number down — a single rugged pool isn't hidden by a
+    locked one (the security review's concern). IMPORTANT: many legit AMMs (Meteora/Orca CLMM) report
+    lpLockedPct=0 AND lpMaxSupply=0 because they don't use a burn/lock script at all — that's "lock not
+    measurable here", NOT "unlocked". We only count pools that actually expose lock data (lpLockedUSD>0 or a
+    real lpMaxSupply), so BONK-style multi-AMM tokens aren't false-flagged. None when no pool is measurable.
+    Pure → unit-tested."""
+    num = den = 0.0
+    measurable = False
+    for m in markets:
+        if not isinstance(m, dict):
+            continue
+        lp = m.get("lp") or {}
+        pct = _f(lp.get("lpLockedPct"))
+        liq = _f(lp.get("baseUSD")) or 0.0
+        locked_usd = _f(lp.get("lpLockedUSD")) or 0.0
+        max_supply = _f(lp.get("lpMaxSupply")) or 0.0
+        if pct is None or liq <= 0:
+            continue
+        # skip pools with no lock telemetry (pct 0 AND no locked-USD AND no LP supply = "can't tell")
+        if pct == 0 and locked_usd <= 0 and max_supply <= 0:
+            continue
+        measurable = True
+        num += pct * liq
+        den += liq
+    if not measurable or den <= 0:
+        return None
+    return round(num / den, 2)
 
 
 def flags(report: RugCheckReport, cfg) -> tuple[list[str], list[str]]:

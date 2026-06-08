@@ -65,7 +65,9 @@ def test_parse_overview_fields():
     payload = {
         "score_normalised": 7, "rugged": False, "creator": "DEV", "creatorBalance": 0,
         "totalLPProviders": 80, "totalMarketLiquidity": 2_000_000,
-        "markets": [{"lp": {"lpLockedPct": 99.9}}, {"lp": {"lpLockedPct": 12.0}}],
+        # equal-liquidity measurable pools at 100% and 0% → liquidity-weighted lock is 50%
+        "markets": [{"lp": {"lpLockedPct": 100.0, "lpLockedUSD": 1000, "baseUSD": 1000}},
+                    {"lp": {"lpLockedPct": 0.0, "baseUSD": 1000, "lpMaxSupply": 1e9}}],
         "insiderNetworks": [{"id": "damp-fawn-possum", "size": 2888, "tokenAmount": 100}],
         "knownAccounts": {"AddrA": {"name": "Pump.fun AMM", "type": "AMM"}, "AddrB": {"type": "LOCKER"}},
         "topHolders": [], "risks": [],
@@ -76,8 +78,54 @@ def test_parse_overview_fields():
         return payload
     c.get_json = fake  # type: ignore
     r = asyncio.run(c.report("m"))
-    assert r.lp_locked_pct == 99.9  # best (deepest pool's) lock
+    assert r.lp_locked_pct == 50.0  # liquidity-weighted across the two equal pools
     assert r.total_lp_providers == 80 and r.markets_count == 2
     assert r.creator_balance == 0
     assert r.insider_networks[0]["id"] == "damp-fawn-possum" and r.insider_networks[0]["size"] == 2888
     assert r.known_accounts["AddrA"] == "Pump.fun AMM" and r.known_accounts["AddrB"] == "LOCKER"
+
+
+# — ADR-043 security fix: liquidity-weighted LP lock (a deep unlocked pool isn't hidden) —
+
+def test_weighted_lp_lock_unlocked_deep_pool_flags():
+    from solscout.data.rugcheck import _weighted_lp_lock
+    # tiny 100%-locked pool + DEEP pool that IS measurable (has lock telemetry) but 0% locked → low weighted
+    markets = [
+        {"lp": {"lpLockedPct": 100.0, "lpLockedUSD": 1000, "baseUSD": 1000}},
+        {"lp": {"lpLockedPct": 0.0, "baseUSD": 500000, "lpMaxSupply": 9e9}},  # real LP supply, just not locked
+    ]
+    w = _weighted_lp_lock(markets)
+    assert w is not None and w < 50  # naive max() would have said 100 (unsafe)
+
+
+def test_weighted_lp_lock_all_locked():
+    from solscout.data.rugcheck import _weighted_lp_lock
+    markets = [{"lp": {"lpLockedPct": 100.0, "lpLockedUSD": 1000, "baseUSD": 1000}},
+               {"lp": {"lpLockedPct": 99.0, "lpLockedUSD": 1980, "baseUSD": 2000}}]
+    assert _weighted_lp_lock(markets) > 98
+
+
+def test_weighted_lp_lock_skips_unmeasurable_pools():
+    from solscout.data.rugcheck import _weighted_lp_lock
+    # Meteora/Orca-style: liquidity present but pct=0 AND no lock telemetry = "can't tell", NOT unlocked
+    assert _weighted_lp_lock([{"lp": {"lpLockedPct": 0.0, "baseUSD": 500000}}]) is None
+
+
+def test_weighted_lp_lock_none_when_no_liquidity():
+    from solscout.data.rugcheck import _weighted_lp_lock
+    assert _weighted_lp_lock([{"lp": {"lpLockedPct": 50.0, "baseUSD": 0}}]) is None
+    assert _weighted_lp_lock([]) is None
+
+
+def test_real_zero_global_lock_not_overridden():
+    # falsy-zero bug fix: a real top-level lpLockedPct of 0 must survive, not be replaced by a per-market value
+    from solscout.data.rugcheck import RugCheckClient
+    import asyncio
+    c = RugCheckClient()
+
+    async def fake(url, cache_key=None):
+        return {"score_normalised": 9, "lpLockedPct": 0,
+                "markets": [{"lp": {"lpLockedPct": 100.0, "baseUSD": 9999}}], "topHolders": [], "risks": []}
+    c.get_json = fake  # type: ignore
+    r = asyncio.run(c.report("m"))
+    assert r.lp_locked_pct == 0  # not silently bumped to 100 by the per-market pool
