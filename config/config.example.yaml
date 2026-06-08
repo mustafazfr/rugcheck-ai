@@ -22,7 +22,9 @@ helius:
   # Align our ESTIMATE to the real Helius dashboard with:  solscout credits-sync <number>
 
 llm:
-  host: "http://localhost:11434"
+  # 127.0.0.1, NOT "localhost": on macOS `localhost` can resolve to IPv6 ::1 / hit the Ollama.app shim and
+  # the httpx client gets a 502 (the analyst then silently drops to deterministic rules). IPv4 loopback is reliable.
+  host: "http://127.0.0.1:11434"
   synthesis_model: "qwen2.5:latest"
   classify_model: "llama3.2:3b"
   analyst_model: "qwen2.5:14b"   # ADR-042: web AI analyst (reasons over the FULL report); bigger = better.

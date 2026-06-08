@@ -30,7 +30,10 @@ class HeliusCfg(BaseModel):
 
 
 class LlmCfg(BaseModel):
-    host: str = "http://localhost:11434"
+    # 127.0.0.1, NOT "localhost": on macOS `localhost` can resolve to IPv6 ::1 (or hit the Ollama.app
+    # menubar shim) and the httpx-based client gets a 502 while curl silently falls back to IPv4. Pinning
+    # the IPv4 loopback makes the local-LLM path reliable (the analyst was silently dropping to rules).
+    host: str = "http://127.0.0.1:11434"
     synthesis_model: str = "qwen2.5:latest"
     classify_model: str = "llama3.2:3b"
     # ADR-042: the web "AI analyst" reasons over the FULL forensic report. A bigger local model gives much
