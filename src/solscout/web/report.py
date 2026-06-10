@@ -30,6 +30,9 @@ CRITICAL_FLAGS = {
     "goplus_high_transfer_fee",
     # deep deployer/buyer forensics (ADR-041)
     "deployer_serial_rugger",
+    # ADR-046: the deployer's funder ALSO funded the fresh top buyers → one entity built the whole
+    # "market" (deployer + holders + volume). The strongest rug pattern we can prove on-chain.
+    "insider_funding_match",
 }
 DANGER_FLAGS = {
     "wash_volume",
@@ -50,6 +53,9 @@ DANGER_FLAGS = {
     # timeline forensics (ADR-046): pumping many OTHER token CAs / forged identity metadata = active deception
     "twitter_serial_shill",
     "twitter_id_mismatch",
+    # intelligence pack (ADR-046)
+    "ticker_impersonation",
+    "insider_network_dominant",
 }
 SOFT_FLAGS = {
     "high_turnover", "txn_imbalance", "low_float", "rugcheck_elevated", "llm_rug",
@@ -64,6 +70,23 @@ SOFT_FLAGS = {
     # timeline heuristics (ADR-046): suggestive, not proof
     "twitter_no_ca_mention", "twitter_site_mismatch", "twitter_burst_posting",
     "website_brand_new",
+    # intelligence pack (ADR-046)
+    "young_premined", "fdv_mcap_inflated", "transfer_fee_unusual", "creator_token_factory",
+}
+
+# symbol → canonical mint for the most-impersonated majors. A token CLAIMING one of these tickers with a
+# different mint is impersonation (DANGER). Conservative list — every mint here is verified canonical.
+MAJOR_TICKERS = {
+    "SOL": "So11111111111111111111111111111111111111112",
+    "WSOL": "So11111111111111111111111111111111111111112",
+    "USDC": "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v",
+    "USDT": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB",
+    "BONK": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+    "JUP": "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+    "RAY": "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+    "WIF": "EKpQGSJtjMFqKZ9KQanSqYXRcF8fBopzLHYxdM65zcjm",
+    "PYTH": "HZ1JovNiVvGrGNiiYvEozEVgZ58xaU3RKwX8eACQBCt3",
+    "JTO": "jtojtomepa8beP8AuQc6eXt5FriJwfFMwQx2v2f9mCL",
 }
 
 LEVELS = ("SAFE", "CAUTION", "DANGER", "CRITICAL")
@@ -92,6 +115,7 @@ def build_report(a, cfg, *, osint: dict | None = None, took_ms: int | None = Non
     osint = osint or {}
     metrics = filt.metrics or {}
     all_flags = set(filt.hard_flags or []) | set(dec.veto_flags or []) | set(osint.get("flags") or [])
+    all_flags |= _intel_flags(a, cfg, osint, all_flags)  # ADR-046 zero-cost intelligence pack
 
     checks = _build_checks(a, cfg, all_flags, osint)
     score, level = _score_and_level(filt, metrics, all_flags)
@@ -205,6 +229,48 @@ def _check(cid, label, category, status, detail) -> dict:
     return {"id": cid, "label": label, "category": category, "status": status, "detail": detail}
 
 
+def _intel_flags(a, cfg, osint, existing: set) -> set:
+    """ADR-046 — extra deterministic flags from data ALREADY in hand (zero new API calls). Pure."""
+    flags: set[str] = set()
+    market, mi = a.market, a.mint_info
+    metrics = a.filt.metrics or {}
+    ck = cfg.checks
+
+    # 1) ticker impersonation: claims a major's symbol with a different mint
+    sym = ((market.symbol if market else "") or "").upper().lstrip("$")
+    canonical = MAJOR_TICKERS.get(sym)
+    if canonical and a.mint != canonical:
+        flags.add("ticker_impersonation")
+
+    # 2) young + pre-mined: minutes old, yet one wallet already dominates → dump waiting to happen
+    age_min = None
+    if market and market.pair_created_at:
+        age_min = max(0.0, (datetime.now(timezone.utc) - market.pair_created_at).total_seconds() / 60)
+    t1 = mi.top1_pct if mi else None
+    if (age_min is not None and age_min < ck.young_premine_age_min
+            and t1 is not None and t1 > ck.young_premine_top1_pct):
+        flags.add("young_premined")
+
+    # 3) FDV vastly above market cap = most supply locked/unvested, headline numbers inflated
+    if market and market.fdv and market.market_cap and market.market_cap > 0:
+        if market.fdv / market.market_cap > ck.fdv_mcap_max_ratio:
+            flags.add("fdv_mcap_inflated")
+
+    # 4) transfer fee in the "unusual but under the hard veto" band
+    fee = (metrics.get("goplus") or {}).get("transfer_fee_pct")
+    if fee is not None and ck.transfer_fee_warn_pct <= fee <= cfg.goplus.max_transfer_fee_pct:
+        flags.add("transfer_fee_unusual")
+
+    # 5) token factory: creator launched many tokens (RugCheck count catches what the Helius tx-window
+    #    misses) — graduated, and skipped when the serial-deployer CRITICAL already fired
+    dep = osint.get("deployer") or {}
+    n_created = max(dep.get("prior_creations") or 0, dep.get("rugcheck_tokens") or 0)
+    if "deployer_serial_rugger" not in existing and n_created >= ck.creator_tokens_flag:
+        flags.add("creator_token_factory")
+
+    return flags
+
+
 def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
     filt, market, mi = a.filt, a.market, a.mint_info
     metrics = filt.metrics or {}
@@ -271,6 +337,19 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
         out.append(_check("txn", "Txn buy/sell balance", "Manipulation", "warn", "Far more buy than sell txns"))
     if has("low_float"):
         out.append(_check("float", "Healthy circulating float", "Manipulation", "warn", "Little supply outside the pool"))
+    # — intelligence pack (ADR-046): emitted only when the underlying data made the check meaningful —
+    sym = ((market.symbol if market else "") or "").upper().lstrip("$")
+    if sym in MAJOR_TICKERS:
+        out.append(_check("imp", "Not impersonating a major ticker", "Manipulation",
+                          "fail" if has("ticker_impersonation") else "pass",
+                          (f'Claims "{sym}" but is NOT the canonical {sym} mint — impersonation'
+                           if has("ticker_impersonation") else f"This IS the canonical {sym} mint")))
+    if has("young_premined"):
+        out.append(_check("premine", "No pre-mined dominant wallet at launch", "Holders", "warn",
+                          "Minutes old, yet one wallet already dominates the supply"))
+    if has("fdv_mcap_inflated"):
+        out.append(_check("fdv", "FDV in line with market cap", "Liquidity", "warn",
+                          f"FDV is {_usd(market.fdv)} vs {_usd(market.market_cap)} mcap — most supply not circulating"))
 
     # — Bundle / insiders —
     out.append(_check("bundle", "No sybil/bundle cluster", "Bundle & Insiders",
@@ -279,6 +358,17 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
     out.append(_check("insiders", "No flagged insiders (RugCheck)", "Bundle & Insiders",
                       "fail" if has("rugcheck_insiders") else "pass",
                       "RugCheck flagged insider top-holders" if has("rugcheck_insiders") else "No insider cluster flagged"))
+    if has("insider_funding_match"):
+        fm = ((osint.get("holders_intel") or {}).get("funder_match") or {})
+        out.append(_check("fund_match", "Deployer and buyers funded independently", "Bundle & Insiders",
+                          "fail",
+                          f"The deployer's funding wallet ALSO funded {fm.get('buyers', '?')} fresh top buyers"
+                          " — one entity built this entire \"market\""))
+    if has("insider_network_dominant"):
+        nets = osint.get("insider_networks") or []
+        top = max((n.get("pct") or 0) for n in nets) if nets else 0
+        out.append(_check("net_dom", "No dominant insider network", "Bundle & Insiders", "fail",
+                          f"Largest flagged insider network holds {top:.1f}% of supply"))
     if a.smart and a.smart.deployer_rugged_before:
         out.append(_check("deployer", "Deployer has no prior rug", "Bundle & Insiders", "fail", "Creator wallet rugged before"))
 
@@ -319,6 +409,9 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
             out.append(_check("gp_nt", "Token is transferable", "External (GoPlus)", "fail", "Marked non-transferable = honeypot"))
         if gp.get("malicious_creator"):
             out.append(_check("gp_mal", "Creator not flagged malicious", "External (GoPlus)", "fail", "GoPlus flagged the creator/authority"))
+        if has("transfer_fee_unusual"):
+            out.append(_check("gp_fee", "No unusual transfer tax", "External (GoPlus)", "warn",
+                              f"Token taxes {gp.get('transfer_fee_pct')}% per transfer — legal but unusual"))
 
     # — External: Jupiter (independent 3rd source, ADR-046) —
     jp = ((osint.get("sources") or {}).get("jupiter") or {})
@@ -351,6 +444,12 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
         out.append(_check("dep_serial", "Creator is not a serial deployer", "Creator / deployer",
                           "fail" if has("deployer_serial_rugger") else ("pass" if prior is not None else "info"),
                           (f"Creator launched ~{prior} prior tokens" if prior is not None else "Creator wallet identified")))
+        # graduated token-factory read (ADR-046): RugCheck's full count catches what the tx-window misses
+        n_created = max(dep.get("prior_creations") or 0, dep.get("rugcheck_tokens") or 0)
+        if not has("deployer_serial_rugger") and n_created >= cfg.checks.creator_tokens_warn:
+            out.append(_check("dep_factory", "Creator isn't a token factory", "Creator / deployer",
+                              "warn" if has("creator_token_factory") else "info",
+                              f"Creator is linked to {n_created} tokens total (RugCheck history)"))
         if dep.get("age_days") is not None:
             out.append(_check("dep_age", "Creator wallet has history", "Creator / deployer",
                               "warn" if dep["age_days"] < 7 else "pass",

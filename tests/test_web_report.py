@@ -99,3 +99,80 @@ def test_invalid_mint_check():
     r = build_report(_analysis(filt, decision=dec), CFG)
     assert r["level"] == "CRITICAL"
     assert any(c["id"] == "mint_valid" for c in r["checks"])
+
+
+# — ADR-046 intelligence pack: zero-cost flags from already-fetched data —
+
+def test_ticker_impersonation_is_danger():
+    # claims "USDC" but the mint is NOT the canonical USDC mint → impersonation
+    mk = TokenMarket(mint="m", name="USD Coin", symbol="USDC", liquidity_usd=80_000)
+    r = build_report(_analysis(_clean_filt(), market=mk), CFG)
+    assert r["level"] in ("DANGER", "CRITICAL")
+    assert any(c["id"] == "imp" and c["status"] == "fail" for c in r["checks"])
+
+
+def test_canonical_major_passes_impersonation():
+    # the test mint IS canonical WSOL — claiming "SOL" is legit
+    mk = TokenMarket(mint="m", name="Wrapped SOL", symbol="SOL", liquidity_usd=80_000)
+    r = build_report(_analysis(_clean_filt(), market=mk), CFG)
+    assert any(c["id"] == "imp" and c["status"] == "pass" for c in r["checks"])
+
+
+def test_fdv_mcap_inflated_soft():
+    mk = TokenMarket(mint="m", name="X", symbol="XX", liquidity_usd=80_000,
+                     fdv=10_000_000, market_cap=1_000_000)  # 10× → inflated
+    clean = build_report(_analysis(_clean_filt()), CFG)["score"]
+    r = build_report(_analysis(_clean_filt(), market=mk), CFG)
+    assert any(c["id"] == "fdv" and c["status"] == "warn" for c in r["checks"])
+    assert r["score"] < clean
+
+
+def test_young_premined_warns():
+    from datetime import datetime, timedelta, timezone
+    mi = MintInfo(mint="m", mint_authority=None, freeze_authority=None, top1_pct=45.0)
+    mk = TokenMarket(mint="m", name="X", symbol="XX", liquidity_usd=80_000,
+                     pair_created_at=datetime.now(timezone.utc) - timedelta(minutes=5))
+    r = build_report(_analysis(_clean_filt(), market=mk, mi=mi), CFG)
+    assert any(c["id"] == "premine" and c["status"] == "warn" for c in r["checks"])
+
+
+def test_insider_funding_match_is_critical():
+    osint = {"flags": ["insider_funding_match"],
+             "holders_intel": {"profiled": 8, "fresh": 5, "traders": 1, "rows": [],
+                               "funder_match": {"funder": "F1", "buyers": 4}}}
+    r = build_report(_analysis(_clean_filt()), CFG, osint=osint)
+    assert r["level"] == "CRITICAL"
+    assert any(c["id"] == "fund_match" and c["status"] == "fail" for c in r["checks"])
+
+
+def test_creator_token_factory_graduated():
+    # RugCheck links the creator to 6 tokens while the Helius window saw 0 → factory soft flag
+    osint = {"flags": [], "deployer": {"wallet": "W", "prior_creations": 0, "rugcheck_tokens": 6}}
+    r = build_report(_analysis(_clean_filt()), CFG, osint=osint)
+    assert any(c["id"] == "dep_factory" and c["status"] == "warn" for c in r["checks"])
+    # but when the serial-CRITICAL already fired, the factory flag is skipped (no double count)
+    osint2 = {"flags": ["deployer_serial_rugger"],
+              "deployer": {"wallet": "W", "prior_creations": 5, "rugcheck_tokens": 6, "serial": True}}
+    r2 = build_report(_analysis(_clean_filt()), CFG, osint=osint2)
+    assert r2["level"] == "CRITICAL"
+    assert not any(c["id"] == "dep_factory" and c["status"] == "warn" for c in r2["checks"])
+
+
+def test_transfer_fee_band_warns():
+    filt = _clean_filt()
+    filt.metrics["goplus"] = {"trusted": False, "transfer_fee_pct": 5.0, "risks": []}
+    r = build_report(_analysis(filt), CFG)
+    assert any(c["id"] == "gp_fee" and c["status"] == "warn" for c in r["checks"])
+    # above the hard-veto threshold the CRITICAL goplus flag owns it — no warn band
+    filt2 = _clean_filt()
+    filt2.metrics["goplus"] = {"trusted": False, "transfer_fee_pct": 50.0, "risks": []}
+    r2 = build_report(_analysis(filt2), CFG)
+    assert not any(c["id"] == "gp_fee" for c in r2["checks"])
+
+
+def test_insider_network_dominant_is_danger():
+    osint = {"flags": ["insider_network_dominant"],
+             "insider_networks": [{"id": "n1", "accounts": 12, "pct": 38.0}]}
+    r = build_report(_analysis(_clean_filt()), CFG, osint=osint)
+    assert r["level"] in ("DANGER", "CRITICAL")
+    assert any(c["id"] == "net_dom" and "38.0%" in c["detail"] for c in r["checks"])

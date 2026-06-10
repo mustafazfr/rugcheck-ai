@@ -108,7 +108,8 @@ manipulation:
   # REAL-ACTIVITY floor (ADR-038) — reject husks / one-way honeypots (WIF 37 holders/1 txn; BARRON 3/0; IRAN 1/0)
   min_holders: 50                    # reject when the trusted holder count is below this
   min_traders: 40                    # reject when unique buyers+sellers (24h) is below this
-  no_seller_min_buyers: 10           # ≥ this many buyers but ZERO sellers → honeypot/one-way → reject
+  no_seller_min_buyers: 10           # ≥ this many buyers but ~no sellers → honeypot/one-way → reject
+  min_sellers_abs: 3                 # ADR-046: absolute seller floor (2 sellers in 500 buyers = same trap)
 
 # Stage 3b — bundle / sybil-cluster detection (ADR-038, the Bubblemaps signal). For a BUY candidate, trace the
 # top holders' SOL funders (Helius, cached); many top holders sharing ONE funder = insider/sybil distribution
@@ -231,6 +232,18 @@ run:
 rdap:
   enabled: true
   min_domain_age_days: 14      # younger than this → website_brand_new soft flag
+
+# ADR-046 — the zero-cost intelligence pack: extra graded web checks from data ALREADY fetched.
+checks:
+  fdv_mcap_max_ratio: 8        # FDV/mcap above this = lock-heavy supply inflating headline numbers
+  young_premine_age_min: 10    # pair younger than this (minutes)…
+  young_premine_top1_pct: 30   # …with one wallet over this % = pre-mined dump waiting
+  insider_network_max_pct: 25  # largest RugCheck insider network above this % of supply → DANGER
+  transfer_fee_warn_pct: 2     # fee in [this, goplus.max_transfer_fee_pct) = unusual-tax warning
+  creator_tokens_warn: 2       # creator linked to ≥ this many tokens → informational row
+  creator_tokens_flag: 5       # ≥ this many (not already serial-CRITICAL) → token-factory soft flag
+  lp_unlock_min_age_days: 3    # LP-unlock judged only once the pair is old enough…
+  lp_unlock_min_pct: 15        # …and the measured lock is clearly low
 
 # ADR-046 — rugcheck.ai web product: persistent caches (repeat checks cost 0 Helius credits, across
 # restarts/workers), refresh-abuse guard, per-IP rate limits and a daily Helius sub-budget so the free

@@ -238,6 +238,7 @@ class ManipulationCfg(BaseModel):
     min_holders: int = 50  # reject when the (trusted) holder count is below this
     min_traders: int = 40  # reject when unique buyers+sellers (24h) is below this
     no_seller_min_buyers: int = 10  # if there are ≥ this many buyers but ZERO sellers → honeypot/one-way
+    min_sellers_abs: int = 3  # ADR-046: fewer ABSOLUTE sellers than this (with real buyers) = same honeypot shape
 
 
 class ClusterCfg(BaseModel):
@@ -295,6 +296,21 @@ class TwitterCfg(BaseModel):
     burst_max_1h: int = 20  # more tweets than this inside one hour = bot-cadence tell
     excerpt_count: int = 3  # tweet excerpts handed to the AI analyst (each <data>-fenced)
     excerpt_len: int = 140
+
+
+class ChecksCfg(BaseModel):
+    """ADR-046 — the zero-cost intelligence pack: extra graded web checks computed from data we ALREADY
+    fetch (no new API calls). Every threshold lives here, never in code."""
+
+    fdv_mcap_max_ratio: float = 8.0  # FDV/mcap above this = lock-heavy supply pumping the headline numbers
+    young_premine_age_min: float = 10.0  # a pair younger than this (minutes)…
+    young_premine_top1_pct: float = 30.0  # …with one wallet over this % = pre-mined dump waiting
+    insider_network_max_pct: float = 25.0  # largest RugCheck insider network above this % of supply
+    transfer_fee_warn_pct: float = 2.0  # fee in [warn, goplus.max_transfer_fee_pct) band = unusual-tax warning
+    creator_tokens_warn: int = 2  # creator launched ≥ this many tokens → informational warning
+    creator_tokens_flag: int = 5  # ≥ this many (and not already serial-CRITICAL) → token-factory soft flag
+    lp_unlock_min_age_days: float = 3.0  # LP-unlock only flagged once the pair is old enough to judge…
+    lp_unlock_min_pct: float = 15.0  # …and the measured lock is clearly low
 
 
 class RdapCfg(BaseModel):
@@ -377,6 +393,7 @@ class Config(BaseModel):
     goplus: GoPlusCfg = Field(default_factory=GoPlusCfg)
     twitter: TwitterCfg = Field(default_factory=TwitterCfg)
     rdap: RdapCfg = Field(default_factory=RdapCfg)
+    checks: ChecksCfg = Field(default_factory=ChecksCfg)
     deployer: DeployerCfg = Field(default_factory=DeployerCfg)
     social: SocialCfg = Field(default_factory=SocialCfg)
     smart_money: SmartMoneyCfg = Field(default_factory=SmartMoneyCfg)

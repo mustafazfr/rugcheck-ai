@@ -40,8 +40,10 @@ def assess(
     if buyers is not None and sellers is not None:
         if (buyers + sellers) < cfg.min_traders:
             hard.append("too_few_traders")
-        elif sellers == 0 and buyers >= cfg.no_seller_min_buyers:
-            hard.append("no_sellers")  # plenty of buyers, ZERO sellers → can't/won't sell = honeypot
+        elif sellers < cfg.min_sellers_abs and buyers >= cfg.no_seller_min_buyers:
+            # plenty of buyers, ~no sellers → can't/won't sell = honeypot. ADR-046: an ABSOLUTE floor —
+            # 2 sellers among 500 buyers passes the ratio check by luck but is the same trap.
+            hard.append("no_sellers")
 
     # 1) LOPSIDED FLOW — almost everyone buying, ~nobody selling = honeypot / one-way pump.
     #    (BARRON: 33 unique sellers vs 1,696 buyers ≈ 2% seller share.)

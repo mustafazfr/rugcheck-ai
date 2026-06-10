@@ -275,10 +275,19 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup
             rows.append({
                 "owner": h.get("owner"), "pct": h.get("pct"), "fresh": f, "trader": t,
                 "swaps": s["swaps_total"], "tokens": s["distinct_tokens"], "net_sol": s["net_sol"],
+                "funder": s.get("funder"),
             })
         out["holders_intel"] = {"profiled": len(rows), "fresh": fresh, "traders": traders, "rows": rows}
         if fresh >= cfg.deployer.fresh_buyer_min:
             out["flags"].append("fresh_buyer_cluster")
+        # — ADR-046 the strongest rug pattern, free (both funders already computed): the wallet that
+        #   funded the DEPLOYER also funded the fresh top buyers → one entity built the whole "market" —
+        dep_funder = out["deployer"].get("funded_by")
+        if dep_funder:
+            matched = [r["owner"] for r in rows if r.get("fresh") and r.get("funder") == dep_funder]
+            if matched:
+                out["holders_intel"]["funder_match"] = {"funder": dep_funder, "buyers": len(matched)}
+                out["flags"].append("insider_funding_match")
 
     # — token overview + LP lock + markets (ADR-043: surface what RugCheck already gave us) —
     if rc_rep and rc_rep.available:
@@ -291,8 +300,15 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup
             "markets": rc_rep.markets_count,
             "total_liquidity": rc_rep.total_market_liquidity,
         }
-        # only a soft nudge, and only when LP-lock was actually MEASURABLE and clearly low (ADR-043)
-        if rc_rep.lp_locked_pct is not None and rc_rep.lp_locked_pct < 25:
+        # only a soft nudge, and only when LP-lock was MEASURABLE, clearly low AND the pair is old
+        # enough to judge (ADR-046: a day-old token simply hasn't had time to lock — don't punish it)
+        pair_age_days = (
+            (datetime.now(timezone.utc) - a.market.pair_created_at).days
+            if (a.market and a.market.pair_created_at) else None
+        )
+        if (rc_rep.lp_locked_pct is not None and pair_age_days is not None
+                and pair_age_days >= cfg.checks.lp_unlock_min_age_days
+                and rc_rep.lp_locked_pct < cfg.checks.lp_unlock_min_pct):
             out["flags"].append("lp_unlocked")
         # — Insider Networks (named clusters — the distinctive Bubblemaps-style panel) —
         if rc_rep.insider_networks:
@@ -302,6 +318,10 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup
                  "pct": round(100 * n["token_amount"] / tot, 2) if tot else None}
                 for n in rc_rep.insider_networks
             ]
+            # ADR-046: one named network holding a dominant share = coordinated supply, not distribution
+            top_net = max((n["pct"] or 0) for n in out["insider_networks"])
+            if top_net > cfg.checks.insider_network_max_pct:
+                out["flags"].append("insider_network_dominant")
         # — known-account labels for the holder bars (Pump.fun AMM, Streamflow Vault, Raydium, …) —
         if rc_rep.known_accounts:
             out["labels"] = {k: v for k, v in rc_rep.known_accounts.items() if v}

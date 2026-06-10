@@ -94,3 +94,15 @@ def test_no_sellers_is_honeypot():
 def test_real_active_token_passes_activity():
     hard, _ = assess(_mk(buyers_h24=400, sellers_h24=300), age_min=300, float_pct=40, cfg=CFG, holder_count=500)
     assert not ({"too_few_holders", "too_few_traders", "no_sellers"} & set(hard))
+
+
+def test_absolute_seller_floor_catches_near_zero_sellers():
+    # ADR-046: 2 sellers among 40 buyers passes the old ==0 check and is below the 50-trader
+    # lopsided threshold — but it's the same honeypot shape. The absolute floor catches it.
+    hard, _ = assess(_mk(buyers_h24=40, sellers_h24=2), age_min=300, float_pct=40, cfg=CFG)
+    assert "no_sellers" in hard
+
+
+def test_seller_floor_boundary_not_flagged():
+    hard, _ = assess(_mk(buyers_h24=40, sellers_h24=3), age_min=300, float_pct=40, cfg=CFG)
+    assert "no_sellers" not in hard
