@@ -309,6 +309,8 @@ class ChecksCfg(BaseModel):
     transfer_fee_warn_pct: float = 2.0  # fee in [warn, goplus.max_transfer_fee_pct) band = unusual-tax warning
     creator_tokens_warn: int = 2  # creator launched ≥ this many tokens → informational warning
     creator_tokens_flag: int = 5  # ≥ this many (and not already serial-CRITICAL) → token-factory soft flag
+    factory_max_age_days: float = 30.0  # factory/serial tells catch FRESH scams; a token that has survived
+    #   months isn't a launch-mill victim (BONK dev=10, WIF dev=15 — established majors must not be dinged)
     lp_unlock_min_age_days: float = 3.0  # LP-unlock only flagged once the pair is old enough to judge…
     lp_unlock_min_pct: float = 15.0  # …and the measured lock is clearly low
 

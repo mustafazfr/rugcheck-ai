@@ -261,11 +261,14 @@ def _intel_flags(a, cfg, osint, existing: set) -> set:
     if fee is not None and ck.transfer_fee_warn_pct <= fee <= cfg.goplus.max_transfer_fee_pct:
         flags.add("transfer_fee_unusual")
 
-    # 5) token factory: creator launched many tokens (RugCheck count catches what the Helius tx-window
-    #    misses) — graduated, and skipped when the serial-deployer CRITICAL already fired
+    # 5) token factory: creator launched many tokens (RugCheck/Jupiter counts catch what the Helius
+    #    tx-window misses) — graduated, skipped when the serial-deployer CRITICAL already fired, and
+    #    AGE-GATED: it's a fresh-scam tell; an established token's dev history is public knowledge.
     dep = osint.get("deployer") or {}
     n_created = max(dep.get("prior_creations") or 0, dep.get("rugcheck_tokens") or 0)
-    if "deployer_serial_rugger" not in existing and n_created >= ck.creator_tokens_flag:
+    age_days = (age_min / 1440) if age_min is not None else None
+    if ("deployer_serial_rugger" not in existing and n_created >= ck.creator_tokens_flag
+            and age_days is not None and age_days <= ck.factory_max_age_days):
         flags.add("creator_token_factory")
 
     return flags
@@ -441,15 +444,20 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
     dep = (osint.get("deployer") or {})
     if dep.get("wallet"):
         prior = dep.get("prior_creations")
+        via_jup = dep.get("source") == "jupiter"
         out.append(_check("dep_serial", "Creator is not a serial deployer", "Creator / deployer",
                           "fail" if has("deployer_serial_rugger") else ("pass" if prior is not None else "info"),
-                          (f"Creator launched ~{prior} prior tokens" if prior is not None else "Creator wallet identified")))
-        # graduated token-factory read (ADR-046): RugCheck's full count catches what the tx-window misses
+                          (f"Jupiter counts {prior} tokens by this dev (all-time)" if via_jup and prior is not None
+                           else f"Creator launched ~{prior} prior tokens" if prior is not None
+                           else "Creator wallet identified")))
+        # graduated token-factory read (ADR-046): all-time counts catch what the tx-window misses
         n_created = max(dep.get("prior_creations") or 0, dep.get("rugcheck_tokens") or 0)
         if not has("deployer_serial_rugger") and n_created >= cfg.checks.creator_tokens_warn:
+            src_note = "Jupiter all-time count" if via_jup else "RugCheck history"
             out.append(_check("dep_factory", "Creator isn't a token factory", "Creator / deployer",
                               "warn" if has("creator_token_factory") else "info",
-                              f"Creator is linked to {n_created} tokens total (RugCheck history)"))
+                              f"Creator is linked to {n_created} tokens total ({src_note})"
+                              + ("" if has("creator_token_factory") else " — informational for an established token")))
         if dep.get("age_days") is not None:
             out.append(_check("dep_age", "Creator wallet has history", "Creator / deployer",
                               "warn" if dep["age_days"] < 7 else "pass",

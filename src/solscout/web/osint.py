@@ -240,18 +240,18 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup
         if serial:
             out["flags"].append("deployer_serial_rugger")
     elif use_jup_dep:
-        prior = jt.dev_mints
-        serial = prior >= cfg.deployer.serial_creator_min
+        # Jupiter devMints is an ALL-TIME count, not the recent-window TOKEN_CREATE count the serial-
+        # rugger CRITICAL was calibrated on (ADR-041) — BONK's dev shows 10, WIF's 15. It must NEVER
+        # hard-veto on its own; it feeds the graduated `creator_token_factory` SOFT read instead
+        # (which is itself age-gated to young tokens). Caught live: WIF scored a false CRITICAL 12/100.
         out["deployer"] = {
             "wallet": creator,
-            "prior_creations": prior,
+            "prior_creations": jt.dev_mints,
             "rugcheck_tokens": (rc_rep.creator_tokens if rc_rep else None),
-            "serial": serial,
+            "serial": False,
             "source": "jupiter",  # counted by Jupiter — saved a 10cr Helius call (funding/age omitted)
             "links": {"solscan": f"https://solscan.io/account/{creator}"},
         }
-        if serial:
-            out["flags"].append("deployer_serial_rugger")
     elif creator:
         out["deployer"] = {"wallet": creator, "links": {"solscan": f"https://solscan.io/account/{creator}"}}
     else:
@@ -313,14 +313,22 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup
         # — Insider Networks (named clusters — the distinctive Bubblemaps-style panel) —
         if rc_rep.insider_networks:
             tot = supply or 1
+
+            def _net_pct(amount) -> float | None:
+                """tokenAmount/supply as a HOLDINGS %. RugCheck's number is flow-like for big networks
+                and can exceed the supply (WIF's largest: 119.9%) — past 100% it can't be holdings, so
+                report it as unknown rather than nonsense."""
+                p = round(100 * amount / tot, 2) if tot else None
+                return p if (p is not None and 0 <= p <= 100) else None
+
             out["insider_networks"] = [
-                {"id": n["id"], "accounts": n["size"],
-                 "pct": round(100 * n["token_amount"] / tot, 2) if tot else None}
+                {"id": n["id"], "accounts": n["size"], "pct": _net_pct(n["token_amount"])}
                 for n in rc_rep.insider_networks
             ]
-            # ADR-046: one named network holding a dominant share = coordinated supply, not distribution
-            top_net = max((n["pct"] or 0) for n in out["insider_networks"])
-            if top_net > cfg.checks.insider_network_max_pct:
+            # ADR-046: one named network holding a dominant share = coordinated supply, not distribution.
+            # Only judged on PLAUSIBLE values (the >100% flow artifacts above stay informational).
+            plausible = [n["pct"] for n in out["insider_networks"] if n["pct"] is not None]
+            if plausible and max(plausible) > cfg.checks.insider_network_max_pct:
                 out["flags"].append("insider_network_dominant")
         # — known-account labels for the holder bars (Pump.fun AMM, Streamflow Vault, Raydium, …) —
         if rc_rep.known_accounts:

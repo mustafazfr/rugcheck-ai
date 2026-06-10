@@ -145,17 +145,39 @@ def test_insider_funding_match_is_critical():
     assert any(c["id"] == "fund_match" and c["status"] == "fail" for c in r["checks"])
 
 
+def _young_market(minutes=60, **kw):
+    from datetime import datetime, timedelta, timezone
+    base = dict(mint="m", name="X", symbol="XX", liquidity_usd=80_000,
+                pair_created_at=datetime.now(timezone.utc) - timedelta(minutes=minutes))
+    base.update(kw)
+    return TokenMarket(**base)
+
+
 def test_creator_token_factory_graduated():
-    # RugCheck links the creator to 6 tokens while the Helius window saw 0 → factory soft flag
+    # YOUNG token + RugCheck links the creator to 6 tokens (Helius window saw 0) → factory soft flag
     osint = {"flags": [], "deployer": {"wallet": "W", "prior_creations": 0, "rugcheck_tokens": 6}}
-    r = build_report(_analysis(_clean_filt()), CFG, osint=osint)
+    r = build_report(_analysis(_clean_filt(), market=_young_market()), CFG, osint=osint)
     assert any(c["id"] == "dep_factory" and c["status"] == "warn" for c in r["checks"])
     # but when the serial-CRITICAL already fired, the factory flag is skipped (no double count)
     osint2 = {"flags": ["deployer_serial_rugger"],
               "deployer": {"wallet": "W", "prior_creations": 5, "rugcheck_tokens": 6, "serial": True}}
-    r2 = build_report(_analysis(_clean_filt()), CFG, osint=osint2)
+    r2 = build_report(_analysis(_clean_filt(), market=_young_market()), CFG, osint=osint2)
     assert r2["level"] == "CRITICAL"
     assert not any(c["id"] == "dep_factory" and c["status"] == "warn" for c in r2["checks"])
+
+
+def test_factory_age_gated_majors_exempt():
+    """WIF false-CRITICAL regression: an ESTABLISHED token whose dev shows many all-time mints
+    (Jupiter devMints — BONK 10, WIF 15) must NOT be flagged; the row stays informational."""
+    osint = {"flags": [], "deployer": {"wallet": "W", "prior_creations": 15, "source": "jupiter"}}
+    old = _young_market(minutes=60 * 24 * 400)  # ~400 days old
+    r = build_report(_analysis(_clean_filt(), market=old), CFG, osint=osint)
+    assert r["level"] in ("SAFE", "CAUTION")  # never DANGER/CRITICAL off dev history alone
+    row = next(c for c in r["checks"] if c["id"] == "dep_factory")
+    assert row["status"] == "info" and "Jupiter all-time count" in row["detail"]
+    # same count on a YOUNG token = a real launch-mill tell → soft flag fires
+    r2 = build_report(_analysis(_clean_filt(), market=_young_market(minutes=120)), CFG, osint=osint)
+    assert any(c["id"] == "dep_factory" and c["status"] == "warn" for c in r2["checks"])
 
 
 def test_transfer_fee_band_warns():
