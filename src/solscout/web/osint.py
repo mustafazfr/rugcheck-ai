@@ -81,10 +81,27 @@ def _twitter_url(market) -> str | None:
     return None
 
 
-async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None) -> dict:
+async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup=None) -> dict:
     out: dict = {"flags": []}
     helius_on = getattr(helius, "available", False)
     wallet_ttl = cfg.web.wallet_summary_ttl_s
+
+    # — Jupiter token intel FIRST (ADR-046): free, fast, cached — a 3rd independent source whose
+    #   devMints can replace the 10cr Helius deployer call entirely. —
+    jt = await _safe(jup.token_info(a.mint), "jupiter-info") if jup is not None else None
+    if jt is not None and not jt.available:
+        jt = None
+    if jt and (jt.organic_label or "").lower() == "low":
+        out["flags"].append("jupiter_low_organic")  # Jupiter's own wash/organic detector disagrees with the hype
+    auth_consensus = None
+    if jt and a.mint_info is not None:
+        ours = {"mint": a.mint_info.mint_authority is None, "freeze": a.mint_info.freeze_authority is None}
+        theirs = {"mint": jt.mint_auth_disabled, "freeze": jt.freeze_auth_disabled}
+        known = [(ours[k], theirs[k]) for k in ("mint", "freeze") if theirs[k] is not None]
+        if known:
+            auth_consensus = "agree" if all(o == t for o, t in known) else "mismatch"
+            if auth_consensus == "mismatch":
+                out["flags"].append("authority_consensus_mismatch")
 
     # — Twitter / X identity —
     handle = handle_from_url(_twitter_url(a.market))
@@ -114,14 +131,26 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None) -> 
     rc_rep = await _safe(rc.report(a.mint), "rugcheck") if rc else None
     gp_rep = await _safe(gp.token_security(a.mint), "goplus") if gp else None
     creator = rc_rep.creator if (rc_rep and rc_rep.available) else None
+    if not creator and jt and jt.dev_wallet:
+        creator = jt.dev_wallet  # RugCheck down/missing → Jupiter still knows the dev (free)
 
     # — Deployer + top-buyer history is the heaviest part: ≈1 + N Helius enhanced-tx calls. These used to run
     #   one-by-one (~17s+ on a fresh token, the bulk of the old ~50s wait). Launch them ALL concurrently up
     #   front — the client still staggers request *starts* by 120ms, but the round-trips overlap (ADR-044).
     #   Each wallet goes through the persistent `wallet_tx_summary` cache (ADR-046): a db hit = 0 credits. —
+    # Jupiter-first deployer (ADR-046): when there's no cached summary but Jupiter already counted the
+    # dev's prior mints, skip the 10cr Helius call — devMints answers the serial-deployer question free.
+    dep_cached = (
+        await _safe(db.get_wallet_summary(creator, wallet_ttl), "wallet-cache")
+        if (db is not None and creator) else None
+    )
+    use_jup_dep = (
+        cfg.web.jupiter_first_deployer and dep_cached is None
+        and jt is not None and jt.dev_mints is not None and bool(creator)
+    )
     dep_task = (
         asyncio.create_task(_wallet_intel(creator, helius, db, wallet_ttl, cfg.deployer.tx_limit))
-        if (creator and cfg.deployer.enabled and helius_on) else None
+        if (creator and cfg.deployer.enabled and helius_on and not use_jup_dep) else None
     )
     dist = (a.top_holders or [])[: cfg.deployer.holders_intel_top_n]
 
@@ -147,6 +176,19 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None) -> 
             "funded_by": s.get("funder"),
             "age_days": s.get("age_days"),
             "serial": serial,
+            "links": {"solscan": f"https://solscan.io/account/{creator}"},
+        }
+        if serial:
+            out["flags"].append("deployer_serial_rugger")
+    elif use_jup_dep:
+        prior = jt.dev_mints
+        serial = prior >= cfg.deployer.serial_creator_min
+        out["deployer"] = {
+            "wallet": creator,
+            "prior_creations": prior,
+            "rugcheck_tokens": (rc_rep.creator_tokens if rc_rep else None),
+            "serial": serial,
+            "source": "jupiter",  # counted by Jupiter — saved a 10cr Helius call (funding/age omitted)
             "links": {"solscan": f"https://solscan.io/account/{creator}"},
         }
         if serial:
@@ -205,7 +247,7 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None) -> 
         if rc_rep.known_accounts:
             out["labels"] = {k: v for k, v in rc_rep.known_accounts.items() if v}
 
-    # — Source consensus —
+    # — Source consensus (3 independent reads: RugCheck + GoPlus + Jupiter, ADR-046) —
     out["sources"] = {
         "rugcheck": ({"available": True, "score": rc_rep.score, "rugged": rc_rep.rugged,
                       "lp_locked_pct": rc_rep.lp_locked_pct, "total_lp_providers": rc_rep.total_lp_providers,
@@ -214,5 +256,10 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None) -> 
         "goplus": ({"available": True, "trusted": gp_rep.trusted, "risks": gp_rep.risks,
                     "holder_count": gp_rep.holder_count, "lp_holders": gp_rep.lp_holders}
                    if gp_rep and gp_rep.available else {"available": False}),
+        "jupiter": ({"available": True, "verified": jt.verified, "tags": jt.tags[:6],
+                     "organic_score": jt.organic_score, "organic_label": jt.organic_label,
+                     "holder_count": jt.holder_count, "dev_mints": jt.dev_mints,
+                     "auth_consensus": auth_consensus}
+                    if jt else {"available": False}),
     }
     return out

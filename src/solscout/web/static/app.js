@@ -11,7 +11,7 @@ const LEVEL = {
 const STATUS_ICON = { pass: "✓", warn: "!", fail: "✕", skip: "–", info: "i" };
 const CATEGORY_ORDER = ["Authorities", "Liquidity", "Holders", "Activity", "Manipulation",
   "Bundle & Insiders", "Creator / deployer", "Buyers (wallet history)",
-  "External (RugCheck)", "External (GoPlus)", "Honeypot", "Social & AI"];
+  "External (RugCheck)", "External (GoPlus)", "External (Jupiter)", "Honeypot", "Social & AI"];
 
 /* ---------- helpers ---------- */
 const usd = (v) => {
@@ -410,6 +410,20 @@ function renderSources(sources, hp) {
       (gp.holder_count != null ? `<div class="src-meta">${num(gp.holder_count)} holders · ${gp.lp_holders ?? "?"} LP holders</div>` : "") +
       `</div>`;
   } else html += `<div class="src muted-note">GoPlus unavailable</div>`;
+  // Jupiter (3rd independent source, ADR-046)
+  const jp = (sources && sources.jupiter) || { available: false };
+  if (jp.available) {
+    const lab = (jp.organic_label || "").toLowerCase();
+    const ok = lab !== "low" && jp.auth_consensus !== "mismatch";
+    html += `<div class="src"><div class="src-h"><span>Jupiter</span><span class="src-dot" style="background:${ok ? "var(--lime)" : "var(--amber)"}"></span></div>` +
+      `<div class="src-line">${jp.verified ? "Verified list ✓" : "Not verified (normal for new tokens)"}` +
+      (jp.organic_score != null ? ` · organic ${Math.round(jp.organic_score)} (${esc(jp.organic_label || "?")})` : "") + `</div>` +
+      ((jp.tags || []).length ? `<div class="srisks">${jp.tags.map((t) => `<span class="srisk" style="border-color:var(--line)">${esc(t)}</span>`).join("")}</div>` : "") +
+      ((jp.holder_count != null || jp.dev_mints != null)
+        ? `<div class="src-meta">${jp.holder_count != null ? num(jp.holder_count) + " holders" : ""}${jp.holder_count != null && jp.dev_mints != null ? " · " : ""}${jp.dev_mints != null ? "dev launched " + jp.dev_mints + " tokens" : ""}</div>` : "") +
+      (jp.auth_consensus === "mismatch" ? `<div class="srisks"><span class="srisk">authority data mismatch ⚑</span></div>` : "") +
+      `</div>`;
+  } else html += `<div class="src muted-note">Jupiter unavailable</div>`;
   // honeypot
   html += `<div class="kv"><span class="k">Honeypot sell-sim (Jupiter)</span><span>` +
     (hp.simulated ? (hp.sell_ok ? `sellable${hp.round_trip_tax_pct != null ? " · tax " + hp.round_trip_tax_pct + "%" : ""}` : "CANNOT SELL ⚑") : "not run (off by default)") +

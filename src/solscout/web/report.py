@@ -55,6 +55,9 @@ SOFT_FLAGS = {
     # because pools don't all use a lock script. RugCheck's aggregate score/`rugged` is the real LP authority,
     # so an unlocked-LP reading is a soft nudge, never a hard DANGER veto that overrides a clean RugCheck.
     "lp_unlocked",
+    # Jupiter consensus (ADR-046): their organic detector disagreeing, or sources disagreeing about
+    # authorities, is a nudge — our own deterministic checks remain the hard authority.
+    "jupiter_low_organic", "authority_consensus_mismatch",
 }
 
 LEVELS = ("SAFE", "CAUTION", "DANGER", "CRITICAL")
@@ -309,6 +312,30 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
             out.append(_check("gp_nt", "Token is transferable", "External (GoPlus)", "fail", "Marked non-transferable = honeypot"))
         if gp.get("malicious_creator"):
             out.append(_check("gp_mal", "Creator not flagged malicious", "External (GoPlus)", "fail", "GoPlus flagged the creator/authority"))
+
+    # — External: Jupiter (independent 3rd source, ADR-046) —
+    jp = ((osint.get("sources") or {}).get("jupiter") or {})
+    if jp.get("available"):
+        lab = (jp.get("organic_label") or "").lower()
+        if lab:
+            sc = jp.get("organic_score")
+            sc_txt = f"organicScore {sc:.0f} ({lab})" if sc is not None else f"organic activity: {lab}"
+            corro = (" — corroborates our wash-trade detection" if (lab == "low" and has("wash_volume"))
+                     else (" — Jupiter's detector flags inorganic flow we didn't" if lab == "low" else ""))
+            out.append(_check("jup_organic", "Jupiter organic-activity score", "External (Jupiter)",
+                              "warn" if lab == "low" else "pass", sc_txt + corro))
+        tags = jp.get("tags") or []
+        out.append(_check("jup_verified", "Jupiter verified / community list", "External (Jupiter)",
+                          "pass" if jp.get("verified") else "info",
+                          (", ".join(tags) if tags else
+                           ("Verified on Jupiter" if jp.get("verified")
+                            else "Not on Jupiter's verified list (normal for new tokens)"))))
+        if jp.get("auth_consensus"):
+            out.append(_check("jup_auth", "Authority consensus (RPC vs Jupiter)", "External (Jupiter)",
+                              "warn" if has("authority_consensus_mismatch") else "pass",
+                              ("Sources DISAGREE about mint/freeze authority — treat the data as suspect"
+                               if has("authority_consensus_mismatch")
+                               else "Independent sources agree on the authorities")))
 
     # — Deployer / creator (ADR-041) —
     dep = (osint.get("deployer") or {})

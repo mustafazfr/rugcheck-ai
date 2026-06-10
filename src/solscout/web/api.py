@@ -191,7 +191,9 @@ async def _run_analysis(mint: str) -> dict:
         funder_store=app.state.funder_store,
     )
     # deep OSINT (twitter + deployer + buyer wallets + source consensus) — best-effort, never fatal
-    osint = await osint_mod.gather(a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"], db=db) or {}
+    osint = await osint_mod.gather(
+        a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"], db=db, jup=c["jup"]
+    ) or {}
     report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
     # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is
     # assembled so the model cites the actual findings, not just name+market. Free + local; best-effort.

@@ -1,0 +1,49 @@
+[
+ {
+  "id": "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263",
+  "name": "Bonk",
+  "symbol": "Bonk",
+  "icon": "https://arweave.net/hQiPZOsRZXGXBJd_82PhVdlM_hACsT_q6wqwf5cSY7I",
+  "decimals": 5,
+  "dev": "9AhKqLR67hwapvG8SA2JFXaCshXc9nALJjpKaHZrsbkw",
+  "circSupply": 87994725351671.05,
+  "totalSupply": 87994725351671.05,
+  "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+  "holderCount": 1006295,
+  "fdv": 376402034.0498223,
+  "mcap": 376402034.0498223,
+  "usdPrice": 4.277552234472362e-06,
+  "priceBlockId": 425531811,
+  "liquidity": 2249725.5588867376,
+  "stats24h": {
+   "numTraders": 3565,
+   "numNetBuyers": 1069,
+   "buyVolume": 647332.9651524143,
+   "buyOrganicVolume": 14545.527817429856
+  },
+  "firstPool": {
+   "id": "GBMoNx84HsFdVK63t8BZuDgyZhSBaeKWB4pHHpoeRM9z",
+   "createdAt": "2023-05-11T17:09:10Z"
+  },
+  "audit": {
+   "mintAuthorityDisabled": true,
+   "freezeAuthorityDisabled": true,
+   "topHoldersPercentage": 34.38847063979308,
+   "devBalancePercentage": 1.660120689577513e-07,
+   "devMints": 10
+  },
+  "organicScore": 85.19773106238263,
+  "organicScoreLabel": "high",
+  "isVerified": true,
+  "tags": [
+   "birdeye-trending",
+   "community",
+   "moonshot-verified",
+   "strict",
+   "verified",
+   "meme"
+  ],
+  "createdAt": "2024-06-07T10:26:40.709Z",
+  "updatedAt": "2026-06-10T10:56:49.109156705Z"
+ }
+]
