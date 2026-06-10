@@ -647,3 +647,58 @@ chose **Groq's free tier** (hosted Llama) for the public LLM. Separately, the wa
 Groq's free tier removes the GPU-hosting cost for a public launch. The proposed monetization (still open) is a
 one-time Solana-Pay micro-payment gating only the Helius-heavy deep dossier, so the free tier stays $0. 200
 tests pass.
+
+### ADR-046 — Zero-cost at scale: persistent caches, rate limits, 3rd source, deep free Twitter, A/B ✅
+**Context:** The user asked to push per-check cost toward zero, make the engine smarter, do Twitter analysis
+deeply and FREE, and add a second frontend design for A/B testing. Audit findings: a fresh check burned up to
+~215 Helius credits (holders 5–10 + deployer 10 + 8 buyer profiles 80 + 12 cluster-gate funder traces 120),
+NOTHING persisted across restarts (in-process caches only), the web API had no rate limiting (one person could
+drain the monthly budget in minutes), and rich free signals (Jupiter token intel, tweet texts, domain age,
+already-fetched RugCheck/GoPlus fields) were unused.
+
+**Decisions (all keyless/free; trading paths untouched):**
+- **P1 Persistent SQLite cache layer:** `web_reports` (L2 report cache), `wallet_tx_summary` (ONE row per
+  wallet carrying swaps/prior_creations/funder/age — deployer & buyers share it, 36h TTL), `holders_cache`,
+  `wallet_funder` (cached-None is a hit; 7d). TTL decided at read; `prune_caches` at startup. Injection
+  pattern everywhere (`holders_store`, `funder_store` params) — `data/` never imports Db. api.py holds ONE
+  shared Db handle (no more per-request schema re-run), singleflight de-dupes concurrent same-mint checks,
+  `refresh=1` is honored at most once per `min_refresh_interval_s`. Result: repeat check = 0 credits across
+  restarts/workers; fresh check with warm wallet caches ≈ 15–50 credits (verified live: fresh 5.2s → L1 11ms →
+  restart → L2 29ms).
+- **P2 Abuse control:** `web/ratelimit.py` (pure TokenBucket / LRU IpLimiter / DailyMintLedger that charges
+  only genuine cache-miss work) + `DailyCap`+`CompositeGovernor` in `core/credits.py` give the web a daily
+  Helius sub-budget (`web:YYYY-MM-DD` rows in the existing `credit_usage` table — no migration). 429 body
+  `{error, scope, detail, retry_after_s}` + Retry-After; health exempt; `rate.enabled` kill-knob.
+- **P3 Jupiter v2 = third independent source:** keyless `lite-api.jup.ag/tokens/v2/search` → audit booleans,
+  organicScore/label (their wash detector), isVerified/tags, holderCount, **devMints** (dev's prior launches,
+  already counted!), dev wallet. Consensus panel is now RugCheck+GoPlus+Jupiter; `jupiter_low_organic` +
+  `authority_consensus_mismatch` SOFT flags; **jupiter-first deployer** skips the 10cr Helius call when
+  devMints answers, and is the fallback when the governor refuses.
+- **P4 Deep free Twitter:** fxtwitter profile now also yields the snowflake `user_id` + bio website; the
+  public **syndication SSR page** gives recent tweet TEXTS free (single attempt, 30min cache — the endpoint
+  IP-rate-limits hard; non-200 just means no timeline section). Pure signals: `tweet_ca_signals` (DISTINCT
+  other-token CAs = serial shill; WSOL/USDC/USDT excluded), `posting_cadence` (burst tell),
+  `snowflake_age_days` + `id_joined_mismatch_days` (the ID encodes the REAL creation date — forged/recycled
+  identity detection), `website_matches`. Flags: `twitter_serial_shill`/`twitter_id_mismatch` DANGER;
+  `twitter_no_ca_mention` (young tokens only), `twitter_site_mismatch`, `twitter_burst_posting` SOFT.
+- **P5 RDAP domain age:** `data/rdap.py` (BaseClient grows a `follow_redirects` param) — the registry's own
+  protocol, keyless; `website_brand_new` SOFT flag + `site_age` check; infra hosts (x.com/t.me/…) excluded.
+- **P6 Zero-cost intelligence pack:** `insider_funding_match` **CRITICAL** (deployer's funder ALSO funded the
+  fresh top buyers → one entity built the market — both funders were already in `wallet_tx_summary`, so it's
+  free); `ticker_impersonation` DANGER (claims SOL/USDC/USDT/BONK/JUP/RAY/WIF/PYTH/JTO with a non-canonical
+  mint); `insider_network_dominant` DANGER (>25% supply); `no_sellers` grew an ABSOLUTE floor
+  (`min_sellers_abs=3`); SOFT: `young_premined`, `fdv_mcap_inflated`, `transfer_fee_unusual` (2–10% band),
+  `creator_token_factory` (RugCheck count, graduated); `lp_unlocked` is now age-gated (≥3d AND <15%).
+  All thresholds in the new `checks:` config block.
+- **P7 Analyst evidence:** `_facts` adds the TWEETS cadence/shill line, ≤3 tweet excerpts **each
+  `<data>`-fenced** (tweets are the most attacker-controlled text in the system), the identity-mismatch line,
+  the WEBSITE domain-age line and the JUPITER consensus line; `_injected()` stays the cross-provider backstop.
+- **P8 Design B "the case file" + A/B:** `styles-b.css` — a full second skin over the SAME DOM (manila paper,
+  Special Elite/IBM Plex Serif/Courier Prime, rotated rubber-stamp verdict, folder-tab heads, pencil-hatched
+  bars, the watcher as a taped sepia "SUBJECT — EXHIBIT A" polaroid). Assignment: pre-paint head script,
+  `?v=a|b` override → sticky localStorage → 50/50. Measurement: `variant` rides the existing check call →
+  `ab_events` UPSERT (fresh vs cached) → `GET /api/ab`. Footer switch link on both themes.
+
+**Honest note:** the syndication timeline 429s aggressively per IP — the timeline section simply doesn't
+render when throttled (fail-open), so don't expect it on every check. The Jupiter/RDAP/Twitter signals are
+heuristics feeding the deterministic flag tiers; the LLM still never decides. 251 tests pass.
