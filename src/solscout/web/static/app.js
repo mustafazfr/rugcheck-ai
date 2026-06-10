@@ -2,12 +2,22 @@
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-const LEVEL = {
-  SAFE:     { color: "#c4f73a", soft: "rgba(196,247,58,.12)", word: "LOOKS CLEAN" },
-  CAUTION:  { color: "#ffb02e", soft: "rgba(255,176,46,.12)", word: "CAUTION" },
-  DANGER:   { color: "#ff7a3d", soft: "rgba(255,122,61,.13)", word: "HIGH RISK" },
-  CRITICAL: { color: "#ff4d57", soft: "rgba(255,77,87,.14)",  word: "CRITICAL" },
+// Per-variant verdict palettes (ADR-046 A/B): A = neon lab tints, B = stamp-pad inks on paper.
+const LEVEL_AB = {
+  a: {
+    SAFE:     { color: "#c4f73a", soft: "rgba(196,247,58,.12)", word: "LOOKS CLEAN" },
+    CAUTION:  { color: "#ffb02e", soft: "rgba(255,176,46,.12)", word: "CAUTION" },
+    DANGER:   { color: "#ff7a3d", soft: "rgba(255,122,61,.13)", word: "HIGH RISK" },
+    CRITICAL: { color: "#ff4d57", soft: "rgba(255,77,87,.14)",  word: "CRITICAL" },
+  },
+  b: {
+    SAFE:     { color: "#1e6e46", soft: "rgba(30,110,70,.10)",  word: "CLEARED" },
+    CAUTION:  { color: "#9a6011", soft: "rgba(154,96,17,.10)",  word: "UNDER REVIEW" },
+    DANGER:   { color: "#b3261e", soft: "rgba(179,38,30,.10)",  word: "HIGH RISK" },
+    CRITICAL: { color: "#7f1d16", soft: "rgba(127,29,22,.12)",  word: "CASE CLOSED" },
+  },
 };
+const LEVEL = LEVEL_AB[window.__V === "b" ? "b" : "a"];
 const STATUS_ICON = { pass: "✓", warn: "!", fail: "✕", skip: "–", info: "i" };
 const CATEGORY_ORDER = ["Authorities", "Liquidity", "Holders", "Activity", "Manipulation",
   "Bundle & Insiders", "Creator / deployer", "Buyers (wallet history)",
@@ -52,6 +62,11 @@ function syncUrl(mint) {
   try { history.replaceState(null, "", mint ? `/?mint=${mint}` : "/"); } catch { /* ignore */ }
 }
 window.addEventListener("DOMContentLoaded", () => {
+  // A/B footer switch (ADR-046): name the current design, link to the other one
+  const v = window.__V === "b" ? "b" : "a";
+  const nameEl = $("#abName"), sw = $("#abSwitch");
+  if (nameEl) nameEl.textContent = v === "b" ? "case file" : "crypto lab";
+  if (sw) sw.href = `/?v=${v === "b" ? "a" : "b"}`;
   const m = new URLSearchParams(location.search).get("mint");
   if (m) { $("#mintInput").value = m; run(m); }
 });
@@ -65,7 +80,7 @@ async function run(mint) {
   $("#report").hidden = true;
   showScanning();
   try {
-    const fetchP = fetch(`/api/check/${mint}`);     // kick off the real work
+    const fetchP = fetch(`/api/check/${mint}?variant=${window.__V || "a"}`);  // variant rides the same call (A/B count)
     await runScanLog(fetchP);                        // step the log, holding on AI synthesis until it lands
     const res = await fetchP;
     const data = await res.json();
@@ -143,6 +158,8 @@ function render(d) {
   const L = LEVEL[d.level] || LEVEL.CAUTION;
   document.documentElement.style.setProperty("--verdict", L.color);
   document.documentElement.style.setProperty("--verdict-soft", L.soft);
+  const vw = $(".verdict-wrap");
+  if (vw) vw.dataset.case = (d.mint || "").slice(0, 4).toUpperCase();  // theme B's "CASE Nº SOL-XXXX" strip
 
   // verdict text
   $("#badge").textContent = `${d.level} · ${L.word}`;

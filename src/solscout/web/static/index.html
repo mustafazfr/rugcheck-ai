@@ -7,8 +7,27 @@
 <meta name="description" content="Free, on-chain Solana token safety forensics — rug, honeypot, wash-trade, bundle & insider detection in one scan." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="/static/styles.css" />
+<script>
+/* A/B design assignment (ADR-046): ?v=a|b override → sticky localStorage → 50/50 coin flip.
+   Injected before <body> parses, so the right skin paints first (no flash of the other theme). */
+(function () {
+  var q = new URLSearchParams(location.search).get("v");
+  var v = (q === "a" || q === "b") ? q : null;
+  try { v = v || localStorage.getItem("rc_v"); } catch (e) { /* private mode */ }
+  if (v !== "a" && v !== "b") v = Math.random() < 0.5 ? "a" : "b";
+  try { localStorage.setItem("rc_v", v); } catch (e) { /* ignore */ }
+  window.__V = v;
+  document.documentElement.dataset.variant = v;
+  function css(href) {
+    var l = document.createElement("link"); l.rel = "stylesheet"; l.href = href;
+    document.head.appendChild(l);
+  }
+  css(v === "b"
+    ? "https://fonts.googleapis.com/css2?family=Special+Elite&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=Courier+Prime:wght@400;700&display=swap"
+    : "https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700;800&display=swap");
+  css(v === "b" ? "/static/styles-b.css" : "/static/styles.css");
+})();
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23070a0c'/%3E%3Cpath d='M16 4l10 5v7c0 6-4.3 10-10 12C10.3 26 6 22 6 16V9z' fill='none' stroke='%23c4f73a' stroke-width='2'/%3E%3C/svg%3E" />
 </head>
 <body>
@@ -146,6 +165,7 @@
 <footer class="foot">
   <div>rugcheck<span class="dot">.ai</span> — free, on-chain Solana token forensics.</div>
   <div class="disc">Not financial advice. No screen catches every scam — this is a defensive screener, not a guarantee. Always DYOR.</div>
+  <div class="abline">design: <span id="abName"></span> · <a id="abSwitch" href="/?v=b">try the other look</a></div>
 </footer>
 
 <script src="/static/app.js"></script>

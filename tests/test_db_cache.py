@@ -65,6 +65,19 @@ async def test_funder_null_hit_vs_miss(db):
     assert (await db.get_funder("W2", ttl_s=-1))[0] is False  # expired → miss
 
 
+# — A/B measurement (ADR-046) —
+
+async def test_ab_bump_and_stats(db):
+    await db.ab_bump("2026-06-10", "a", "check_fresh")
+    await db.ab_bump("2026-06-10", "a", "check_fresh")
+    await db.ab_bump("2026-06-10", "b", "check_cached")
+    await db.ab_bump("2026-06-09", "a", "check_fresh")  # before the window
+    s = await db.ab_stats(since_day="2026-06-10")
+    assert s == {"a": {"check_fresh": 2}, "b": {"check_cached": 1}}
+    s_all = await db.ab_stats(since_day="2026-06-01")
+    assert s_all["a"]["check_fresh"] == 3
+
+
 # — prune deletes only expired rows —
 
 async def test_prune_caches(db):

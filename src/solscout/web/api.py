@@ -203,8 +203,18 @@ async def _run_analysis(mint: str) -> dict:
     return report
 
 
+async def _ab_bump(variant: str | None, event: str) -> None:
+    """Fire-and-forget A/B counter (ADR-046) — measurement must never fail a check."""
+    if variant not in ("a", "b") or not app.state.cfg.web.ab_enabled:
+        return
+    try:
+        await app.state.db.ab_bump(day_key(), variant, event)
+    except Exception:
+        pass
+
+
 @app.get("/api/check/{mint}")
-async def check(mint: str, request: Request, refresh: bool = False):
+async def check(mint: str, request: Request, refresh: bool = False, variant: str | None = None):
     mint = mint.strip()
     if not _B58.match(mint):
         return JSONResponse({"error": "invalid_mint", "detail": "Not a valid Solana mint address."}, status_code=400)
@@ -217,11 +227,13 @@ async def check(mint: str, request: Request, refresh: bool = False):
     # L1 in-process. refresh=1 is honored only past `min_refresh_interval_s` — a cache-busting loop can't
     # force a Helius re-spend every second (ADR-046).
     if hit and (now - hit[0]) < (web.min_refresh_interval_s if refresh else web.report_ttl_s):
+        await _ab_bump(variant, "check_cached")
         return {**hit[1], "cached": True}
     # L2 persistent (survives restarts/extra workers). Same refresh guard via a shorter TTL.
     l2 = await db.cache_get_report(mint, web.min_refresh_interval_s if refresh else web.report_db_ttl_s)
     if l2 is not None:
         cache[mint] = (now, l2)
+        await _ab_bump(variant, "check_cached")
         return {**l2, "cached": True}
 
     # singleflight: if this mint is already being analyzed, await THAT result instead of double-spending
@@ -263,7 +275,21 @@ async def check(mint: str, request: Request, refresh: bool = False):
     cache[mint] = (time.monotonic(), report)
     if report.get("ready", True):  # L2 write — only clean, READY reports persist (PENDING goes stale in minutes)
         await db.cache_put_report(mint, report)
+    await _ab_bump(variant, "check_fresh")
     return {**report, "cached": False}
+
+
+@app.get("/api/ab")
+async def ab_stats(days: int = 14):
+    """A/B design measurement (ADR-046): per-variant check counts over the last `days` UTC days."""
+    from datetime import datetime, timedelta, timezone
+
+    since = (datetime.now(timezone.utc) - timedelta(days=max(1, min(days, 90)))).strftime("%Y-%m-%d")
+    try:
+        stats = await app.state.db.ab_stats(since)
+    except Exception:
+        stats = {}
+    return {"since": since, "variants": stats}
 
 
 # — static frontend —

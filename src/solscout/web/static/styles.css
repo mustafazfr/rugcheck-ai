@@ -290,6 +290,8 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 /* footer */
 .foot{border-top:1px solid var(--line2);padding:30px 24px;text-align:center;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:6px}
 .foot .disc{color:var(--faint);max-width:560px;margin:0 auto;font-size:11px}
+.abline{font-size:11px;color:var(--faint)}
+.abline a{color:var(--cyan)}
 
 @media(max-width:760px){
   .verdict-wrap{grid-template-columns:1fr;text-align:center}

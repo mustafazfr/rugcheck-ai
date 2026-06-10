@@ -81,6 +81,12 @@ CREATE TABLE IF NOT EXISTS holders_cache (
 CREATE TABLE IF NOT EXISTS wallet_funder (
     wallet TEXT PRIMARY KEY, funder TEXT, created_at REAL NOT NULL
 );
+-- ADR-046 A/B design measurement: tiny by construction (days x 2 variants x ~2 events)
+CREATE TABLE IF NOT EXISTS ab_events (
+    day TEXT NOT NULL, variant TEXT NOT NULL, event TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, variant, event)
+);
 """
 
 
@@ -480,6 +486,26 @@ class Db:
             (wallet, funder, time.time()),
         )
         await self._conn.commit()
+
+    # — ADR-046 A/B design measurement —
+    async def ab_bump(self, day: str, variant: str, event: str) -> None:
+        await self._conn.execute(
+            "INSERT INTO ab_events (day, variant, event, count) VALUES (?,?,?,1) "
+            "ON CONFLICT(day, variant, event) DO UPDATE SET count = count + 1",
+            (day, variant, event),
+        )
+        await self._conn.commit()
+
+    async def ab_stats(self, since_day: str) -> dict:
+        """{variant: {event: total}} aggregated from `since_day` (inclusive). One GROUP BY."""
+        cur = await self._conn.execute(
+            "SELECT variant, event, SUM(count) FROM ab_events WHERE day >= ? GROUP BY variant, event",
+            (since_day,),
+        )
+        out: dict[str, dict[str, int]] = {}
+        for variant, event, total in await cur.fetchall():
+            out.setdefault(variant, {})[event] = int(total)
+        return out
 
     async def prune_caches(
         self, report_ttl_s: float, wallet_ttl_s: float, holders_ttl_s: float, funder_ttl_s: float
