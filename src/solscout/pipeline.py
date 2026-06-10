@@ -92,18 +92,36 @@ async def _merge_gecko_flow(market, mint: str, gecko, launch_meta: dict | None) 
             market.price_change_h24 = pool.price_change_24h
 
 
-async def cluster_gate(holders_full: list[tuple[str, int]], ccfg, helius) -> tuple[list[str], int, str | None]:
+async def cluster_gate(
+    holders_full: list[tuple[str, int]], ccfg, helius, funder_store=None
+) -> tuple[list[str], int, str | None]:
     """Trace the top holders' SOL funders (Helius, cached) and detect a sybil bundle. Best-effort: if a
-    holder's history can't be fetched (over credit budget), it just doesn't count toward a cluster."""
+    holder's history can't be fetched (over credit budget), it just doesn't count toward a cluster.
+    `funder_store` (ADR-046, optional) is a persistent L2 behind the in-process dict — a wallet's first
+    funder never changes, so a hit there is free forever (across tokens AND restarts)."""
     funder_by: dict[str, str | None] = {}
     for owner, _amt in holders_full[: ccfg.top_n]:
         if owner in _funder_cache:
             funder_by[owner] = _funder_cache[owner]
             continue
+        if funder_store is not None:
+            try:
+                hit, f = await funder_store.get(owner)
+            except Exception:
+                hit, f = False, None
+            if hit:
+                _funder_cache[owner] = f
+                funder_by[owner] = f
+                continue
         txs = await _safe(helius.address_transactions(owner, limit=ccfg.tx_limit), "cluster-txns") or []
         f = cluster.dominant_funder(txs, owner) if txs else None
         _funder_cache[owner] = f
         funder_by[owner] = f
+        if funder_store is not None and txs:  # don't persist governor-skipped (empty) traces
+            try:
+                await funder_store.put(owner, f)
+            except Exception:
+                pass
     return cluster.detect_bundle(funder_by, ccfg)
 
 
@@ -124,6 +142,7 @@ async def analyze(
     rc=None,
     gp=None,
     skip_llm: bool = False,
+    funder_store=None,
 ) -> Analysis:
     # CREDIT DIET (ADR-020): fetch the cheap signals first (DexScreener=free, mint_info=cheap public RPC).
     # If the token isn't indexed yet (PENDING), return WITHOUT the expensive DAS holders call / social /
@@ -314,7 +333,7 @@ async def analyze(
         and getattr(helius, "available", False)
         and not rc_insiders_known  # RugCheck already vetted insiders (free) → skip our Helius trace
     ):
-        flags, size, funder = await cluster_gate(holders_full, cfg.cluster, helius)
+        flags, size, funder = await cluster_gate(holders_full, cfg.cluster, helius, funder_store=funder_store)
         if flags:
             decision.verdict = Verdict.REJECT
             decision.veto_flags = list(decision.veto_flags) + flags

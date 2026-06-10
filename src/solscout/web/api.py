@@ -9,6 +9,7 @@ Run:  uv run solscout serve   (or)   uv run uvicorn solscout.web.api:app
 
 from __future__ import annotations
 
+import asyncio
 import re
 import time
 from contextlib import asynccontextmanager
@@ -40,15 +41,44 @@ from .report import build_report
 log = get_logger("solscout.web")
 STATIC = Path(__file__).parent / "static"
 _B58 = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")  # base58, no 0/O/I/l
-_CACHE_TTL = 300.0  # per-mint report cache (seconds)
+
+
+# ADR-046: tiny adapters injecting the SQLite caches into clients/pipeline WITHOUT `data/` importing Db.
+class _DbHoldersStore:
+    def __init__(self, db: Db, ttl_s: float):
+        self._db, self._ttl = db, ttl_s
+
+    async def get(self, mint: str):
+        return await self._db.get_holders(mint, self._ttl)
+
+    async def put(self, mint: str, holders, complete: bool) -> None:
+        await self._db.put_holders(mint, holders, complete)
+
+
+class _DbFunderStore:
+    def __init__(self, db: Db, ttl_s: float):
+        self._db, self._ttl = db, ttl_s
+
+    async def get(self, wallet: str):
+        return await self._db.get_funder(wallet, self._ttl)
+
+    async def put(self, wallet: str, funder: str | None) -> None:
+        await self._db.put_funder(wallet, funder)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     cfg, secrets = load()
     app.state.cfg = cfg
-    app.state.cache = {}  # mint -> (ts, report)
+    app.state.cache = {}  # L1: mint -> (ts, report) — in-process, fastest path
+    app.state.inflight = {}  # mint -> Future — singleflight: concurrent same-mint checks share ONE analysis
     async with Db(cfg.storage.db_path) as db:
+        app.state.db = db  # ONE shared handle (aiosqlite serializes through its worker thread; WAL is on)
+        await db.prune_caches(
+            cfg.web.report_db_ttl_s, cfg.web.wallet_summary_ttl_s,
+            cfg.web.holders_db_ttl_s, cfg.web.funder_ttl_s,
+        )
+        app.state.funder_store = _DbFunderStore(db, cfg.web.funder_ttl_s)
         mk = month_key()
         gov = CreditGovernor(cfg.helius.monthly_budget_funnel, used=await db.get_credit_usage(mk))
 
@@ -66,6 +96,7 @@ async def lifespan(app: FastAPI):
                 on_spend=_spend,
                 cost_per_call=cfg.helius.cost_per_call,
                 cost_per_gpa=cfg.helius.cost_per_gpa,
+                holders_store=_DbHoldersStore(db, cfg.web.holders_db_ttl_s),
             ) as helius,
             JupiterClient() as jup,
             RugCheckClient() as rc,
@@ -102,40 +133,77 @@ async def health():
     }
 
 
+async def _run_analysis(mint: str) -> dict:
+    """The full (expensive) pipeline for one mint. Raises on failure — callers map that to a 502."""
+    cfg = app.state.cfg
+    c = app.state.clients
+    db: Db = app.state.db
+    t0 = time.monotonic()
+    watchlist = await db.list_wallets()
+    a = await pipeline.analyze(
+        mint, cfg, dex=c["dex"], rpc=c["rpc"], helius=c["helius"], tg=c["tg"], ts=c["ts"],
+        jup=c["jup"], gecko=c["gecko"], rc=c["rc"], gp=c["gp"], watchlist=watchlist, skip_llm=True,
+        funder_store=app.state.funder_store,
+    )
+    # deep OSINT (twitter + deployer + buyer wallets + source consensus) — best-effort, never fatal
+    osint = await osint_mod.gather(a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"], db=db) or {}
+    report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
+    # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is
+    # assembled so the model cites the actual findings, not just name+market. Free + local; best-effort.
+    report["ai"] = await analyst.analyze_report(report, cfg.llm, groq_key=app.state.groq_key)
+    return report
+
+
 @app.get("/api/check/{mint}")
 async def check(mint: str, refresh: bool = False):
     mint = mint.strip()
     if not _B58.match(mint):
         return JSONResponse({"error": "invalid_mint", "detail": "Not a valid Solana mint address."}, status_code=400)
 
+    web = app.state.cfg.web
+    db: Db = app.state.db
     cache = app.state.cache
+    now = time.monotonic()
     hit = cache.get(mint)
-    if hit and not refresh and (time.monotonic() - hit[0]) < _CACHE_TTL:
+    # L1 in-process. refresh=1 is honored only past `min_refresh_interval_s` — a cache-busting loop can't
+    # force a Helius re-spend every second (ADR-046).
+    if hit and (now - hit[0]) < (web.min_refresh_interval_s if refresh else web.report_ttl_s):
         return {**hit[1], "cached": True}
+    # L2 persistent (survives restarts/extra workers). Same refresh guard via a shorter TTL.
+    l2 = await db.cache_get_report(mint, web.min_refresh_interval_s if refresh else web.report_db_ttl_s)
+    if l2 is not None:
+        cache[mint] = (now, l2)
+        return {**l2, "cached": True}
 
-    cfg = app.state.cfg
-    c = app.state.clients
-    t0 = time.monotonic()
+    # singleflight: if this mint is already being analyzed, await THAT result instead of double-spending
+    inflight: dict[str, asyncio.Future] = app.state.inflight
+    fut = inflight.get(mint)
+    if fut is not None:
+        report = await fut
+        if report is None:
+            return JSONResponse(
+                {"error": "analysis_failed", "detail": "Could not analyze this token right now.", "mint": mint},
+                status_code=502,
+            )
+        return {**report, "cached": True}
+
+    fut = asyncio.get_running_loop().create_future()
+    inflight[mint] = fut
     try:
-        async with Db(cfg.storage.db_path) as db:
-            watchlist = await db.list_wallets()
-        a = await pipeline.analyze(
-            mint, cfg, dex=c["dex"], rpc=c["rpc"], helius=c["helius"], tg=c["tg"], ts=c["ts"],
-            jup=c["jup"], gecko=c["gecko"], rc=c["rc"], gp=c["gp"], watchlist=watchlist, skip_llm=True,
-        )
-        # deep OSINT (twitter + deployer + buyer wallets + source consensus) — best-effort, never fatal
-        osint = await osint_mod.gather(a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"]) or {}
-        report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
-        # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is
-        # assembled so the model cites the actual findings, not just name+market. Free + local; best-effort.
-        report["ai"] = await analyst.analyze_report(report, cfg.llm, groq_key=app.state.groq_key)
+        report = await _run_analysis(mint)
     except Exception as e:  # never 500 the user — return a graceful error report
         log.warning("check %s failed: %s", mint[:8], e)
+        fut.set_result(None)  # wake waiters; None = failed (no unretrieved-exception noise)
         return JSONResponse(
             {"error": "analysis_failed", "detail": "Could not analyze this token right now.", "mint": mint},
             status_code=502,
         )
+    finally:
+        inflight.pop(mint, None)
+    fut.set_result(report)
     cache[mint] = (time.monotonic(), report)
+    if report.get("ready", True):  # L2 write — only clean, READY reports persist (PENDING goes stale in minutes)
+        await db.cache_put_report(mint, report)
     return {**report, "cached": False}
 
 

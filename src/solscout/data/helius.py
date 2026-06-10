@@ -35,6 +35,7 @@ class HeliusClient(BaseClient):
         on_spend: Callable[[float], Awaitable[None]] | None = None,
         cost_per_call: float = 10.0,
         cost_per_gpa: float = 5.0,
+        holders_store=None,
     ):
         super().__init__("", timeout=25.0, min_interval_s=0.12)
         self.api_key = api_key
@@ -42,6 +43,9 @@ class HeliusClient(BaseClient):
         # credit diet: memoize holders per mint so recheck/duplicate passes don't re-spend credits
         self._holders_ttl = cache_ttl_s
         self._holders_cache: dict[str, tuple[float, tuple[list[tuple[str, int]], bool]]] = {}
+        # ADR-046: optional PERSISTENT holder cache (injected like governor/on_spend — we never import Db
+        # here). Any object with `async get(mint)` / `async put(mint, holders, complete)`; errors ignored.
+        self._holders_store = holders_store
         # credit governor: pace a monthly quota (ADR-022). If over pace, metered calls are skipped.
         self._gov = governor
         self._on_spend = on_spend
@@ -51,6 +55,13 @@ class HeliusClient(BaseClient):
     @property
     def available(self) -> bool:
         return bool(self.api_key)
+
+    def can_meter(self, cost: float | None = None) -> bool:
+        """Would a metered call be allowed right now? (No spend recorded.) Lets callers distinguish a
+        genuinely-empty result from a governor-skipped one — e.g. don't CACHE an empty wallet history
+        that's really just 'over budget'."""
+        cost = self._cost if cost is None else cost
+        return self._gov is None or self._gov.can_spend(cost)
 
     async def _meter(self, cost: float | None = None) -> bool:
         """Return True if a credit-spending call is allowed under the paced budget; record it if so."""
@@ -107,12 +118,22 @@ class HeliusClient(BaseClient):
         hit = self._holders_cache.get(mint)
         if hit and (time.monotonic() - hit[0]) < self._holders_ttl:
             return hit[1]
+        # persistent store (ADR-046): a hit costs 0 credits and survives restarts; never fatal
+        if self._holders_store is not None:
+            try:
+                stored = await self._holders_store.get(mint)
+            except Exception:
+                stored = None
+            if stored is not None:
+                self._holders_cache[mint] = (time.monotonic(), stored)
+                return stored
 
         # 1) cheaper path: getProgramAccounts on Token-2022 (~half a DAS call) — most new mints
         if await self._meter(cost=self._gpa_cost):
             gpa = await self._holders_via_gpa(mint)
             if gpa is not None:
                 self._holders_cache[mint] = (time.monotonic(), gpa)
+                await self._store_holders(mint, gpa)
                 return gpa
 
         # 2) fallback: DAS getTokenAccounts (~10 credits) — large/classic tokens gPA can't return
@@ -133,7 +154,16 @@ class HeliusClient(BaseClient):
                 owners[o] = owners.get(o, 0) + int(a.get("amount") or 0)
         result = (sorted(owners.items(), key=lambda x: -x[1]), len(accts) < page_size)
         self._holders_cache[mint] = (time.monotonic(), result)
+        await self._store_holders(mint, result)
         return result
+
+    async def _store_holders(self, mint: str, result: tuple[list[tuple[str, int]], bool]) -> None:
+        if self._holders_store is None:
+            return
+        try:
+            await self._holders_store.put(mint, result[0], result[1])
+        except Exception:
+            pass  # cache write failures must never break the fetch
 
     async def address_transactions(self, address: str, limit: int = 100) -> list[dict]:
         if not self.api_key or not address:

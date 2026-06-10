@@ -43,6 +43,29 @@ def first_tx_age_days(txs: list[dict]) -> int | None:
     return max(0, (datetime.now(timezone.utc) - oldest).days)
 
 
+async def _wallet_intel(wallet: str, helius, db, ttl_s: float, tx_limit: int) -> dict:
+    """ONE summary per wallet carrying everything we derive from its tx history (swap counts, prior token
+    creations, dominant funder, age) — persisted to SQLite (ADR-046) so a wallet seen across tokens/restarts
+    costs its 10 Helius credits exactly once per TTL. Cache only results from an ALLOWED call (a governor
+    skip returns [] too — caching that would poison the row for the whole TTL)."""
+    if db is not None:
+        hit = await _safe(db.get_wallet_summary(wallet, ttl_s), "wallet-cache")
+        if hit is not None:
+            return hit
+    allowed = helius.can_meter() if hasattr(helius, "can_meter") else True
+    txs = await _safe(helius.address_transactions(wallet, limit=tx_limit), "wallet-txns")
+    ok = txs is not None
+    txs = txs or []
+    s = wallet_swap_summary(txs)
+    s["prior_creations"] = count_prior_creations(txs)
+    s["funder"] = dominant_funder(txs, wallet)
+    s["age_days"] = first_tx_age_days(txs)
+    s["tx_count"] = len(txs)
+    if db is not None and allowed and ok:
+        await _safe(db.put_wallet_summary(wallet, s, tx_limit), "wallet-cache-put")
+    return s
+
+
 async def _safe(coro, label):
     try:
         return await coro
@@ -58,9 +81,10 @@ def _twitter_url(market) -> str | None:
     return None
 
 
-async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
+async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None) -> dict:
     out: dict = {"flags": []}
     helius_on = getattr(helius, "available", False)
+    wallet_ttl = cfg.web.wallet_summary_ttl_s
 
     # — Twitter / X identity —
     handle = handle_from_url(_twitter_url(a.market))
@@ -93,17 +117,16 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
 
     # — Deployer + top-buyer history is the heaviest part: ≈1 + N Helius enhanced-tx calls. These used to run
     #   one-by-one (~17s+ on a fresh token, the bulk of the old ~50s wait). Launch them ALL concurrently up
-    #   front — the client still staggers request *starts* by 120ms, but the round-trips overlap (ADR-044). —
+    #   front — the client still staggers request *starts* by 120ms, but the round-trips overlap (ADR-044).
+    #   Each wallet goes through the persistent `wallet_tx_summary` cache (ADR-046): a db hit = 0 credits. —
     dep_task = (
-        asyncio.create_task(_safe(helius.address_transactions(creator, limit=cfg.deployer.tx_limit), "deployer-txns"))
+        asyncio.create_task(_wallet_intel(creator, helius, db, wallet_ttl, cfg.deployer.tx_limit))
         if (creator and cfg.deployer.enabled and helius_on) else None
     )
     dist = (a.top_holders or [])[: cfg.deployer.holders_intel_top_n]
 
     async def _profile_holder(h):
-        owner = h.get("owner")
-        txs = await _safe(helius.address_transactions(owner, limit=cfg.deployer.holder_tx_limit), "holder-txns") or []
-        s = wallet_swap_summary(txs)
+        s = await _wallet_intel(h.get("owner"), helius, db, wallet_ttl, cfg.deployer.tx_limit)
         return h, s, is_fresh_wallet(s), looks_like_trader(s)
 
     # gather() already schedules each profile as a Task (they run concurrently); just await it later.
@@ -114,15 +137,15 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None) -> dict:
 
     # — Deployer / creator forensics —
     if dep_task is not None:
-        txs = await dep_task or []
-        prior = count_prior_creations(txs)
+        s = await dep_task
+        prior = s.get("prior_creations") or 0
         serial = prior >= cfg.deployer.serial_creator_min
         out["deployer"] = {
             "wallet": creator,
             "prior_creations": prior,
             "rugcheck_tokens": (rc_rep.creator_tokens if rc_rep else None),
-            "funded_by": dominant_funder(txs, creator),
-            "age_days": first_tx_age_days(txs),
+            "funded_by": s.get("funder"),
+            "age_days": s.get("age_days"),
             "serial": serial,
             "links": {"solscan": f"https://solscan.io/account/{creator}"},
         }

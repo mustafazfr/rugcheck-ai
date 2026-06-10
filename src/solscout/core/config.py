@@ -299,6 +299,33 @@ class DeployerCfg(BaseModel):
     fresh_buyer_min: int = 5  # this many of the profiled top holders being fresh wallets → cluster flag
 
 
+class RateCfg(BaseModel):
+    """ADR-046 — per-IP abuse control for the public web API (no new deps, in-process).
+    Cached reports ALWAYS serve; the limits only gate work that would spend Helius credits."""
+
+    enabled: bool = True
+    per_ip_burst: int = 8  # token-bucket capacity (instant burst per IP)
+    per_ip_refill_per_s: float = 0.25  # ≈15 requests/min sustained per IP
+    daily_unique_mints_per_ip: int = 40  # fresh (cache-miss) mints one IP may trigger per UTC day
+    max_tracked_ips: int = 10_000  # LRU bound on the in-memory IP table
+    trust_proxy: bool = False  # True behind a reverse proxy → honor the first X-Forwarded-For hop
+
+
+class WebCfg(BaseModel):
+    """ADR-046 — web product knobs: persistent caches (cost→0) + daily Helius sub-budget + A/B."""
+
+    report_ttl_s: float = 300  # L1 in-process report cache (was hardcoded in api.py)
+    report_db_ttl_s: float = 900  # L2 persistent report cache (survives restarts/workers)
+    min_refresh_interval_s: float = 60  # refresh=1 can't force a re-spend more often than this
+    wallet_summary_ttl_s: float = 129_600  # 36h — deployer/buyer tx summaries (wallets change slowly)
+    holders_db_ttl_s: float = 1800  # persistent holder-set cache
+    funder_ttl_s: float = 604_800  # 7d — a wallet's first SOL funder never changes
+    jupiter_first_deployer: bool = True  # use Jupiter devMints (free) before the 10cr Helius deployer call
+    helius_daily_budget: float = 15_000  # web's own daily Helius credit cap (inside the monthly governor)
+    ab_enabled: bool = True  # serve/measure the two frontend design variants
+    rate: RateCfg = Field(default_factory=RateCfg)
+
+
 class RunCfg(BaseModel):
     """Continuous-loop knobs (the unattended `run` command)."""
 
@@ -338,6 +365,7 @@ class Config(BaseModel):
     execution: ExecutionCfg = Field(default_factory=ExecutionCfg)
     position: PositionCfg = Field(default_factory=PositionCfg)
     run: RunCfg = Field(default_factory=RunCfg)
+    web: WebCfg = Field(default_factory=WebCfg)
     storage: StorageCfg = Field(default_factory=StorageCfg)
     alerts: AlertsCfg = Field(default_factory=AlertsCfg)
 

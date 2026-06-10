@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -65,6 +66,20 @@ CREATE TABLE IF NOT EXISTS mined_winners (
 );
 CREATE TABLE IF NOT EXISTS credit_usage (
     month TEXT PRIMARY KEY, credits REAL DEFAULT 0
+);
+-- ADR-046 web persistent caches: repeat lookups cost 0 Helius credits across restarts/workers.
+-- TTL is decided at READ time (created_at + ttl < now → miss); prune_caches bounds file size.
+CREATE TABLE IF NOT EXISTS web_reports (
+    mint TEXT PRIMARY KEY, report_json TEXT NOT NULL, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS wallet_tx_summary (
+    wallet TEXT PRIMARY KEY, summary_json TEXT NOT NULL, tx_limit INTEGER NOT NULL, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS holders_cache (
+    mint TEXT PRIMARY KEY, holders_json TEXT NOT NULL, complete INTEGER NOT NULL, created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS wallet_funder (
+    wallet TEXT PRIMARY KEY, funder TEXT, created_at REAL NOT NULL
 );
 """
 
@@ -399,4 +414,83 @@ class Db:
             "ON CONFLICT(month) DO UPDATE SET credits = ?",
             (month, credits, credits),
         )
+        await self._conn.commit()
+
+    # --- ADR-046 web persistent caches: cost→0. TTL decided at READ time; writes always overwrite. ---
+    async def cache_get_report(self, mint: str, ttl_s: float) -> dict | None:
+        cur = await self._conn.execute(
+            "SELECT report_json FROM web_reports WHERE mint=? AND created_at >= ?",
+            (mint, time.time() - ttl_s),
+        )
+        row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def cache_put_report(self, mint: str, report: dict) -> None:
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO web_reports (mint, report_json, created_at) VALUES (?,?,?)",
+            (mint, json.dumps(report), time.time()),
+        )
+        await self._conn.commit()
+
+    async def get_wallet_summary(self, wallet: str, ttl_s: float) -> dict | None:
+        cur = await self._conn.execute(
+            "SELECT summary_json FROM wallet_tx_summary WHERE wallet=? AND created_at >= ?",
+            (wallet, time.time() - ttl_s),
+        )
+        row = await cur.fetchone()
+        return json.loads(row[0]) if row else None
+
+    async def put_wallet_summary(self, wallet: str, summary: dict, tx_limit: int) -> None:
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO wallet_tx_summary (wallet, summary_json, tx_limit, created_at) "
+            "VALUES (?,?,?,?)",
+            (wallet, json.dumps(summary), tx_limit, time.time()),
+        )
+        await self._conn.commit()
+
+    async def get_holders(self, mint: str, ttl_s: float) -> tuple[list[tuple[str, int]], bool] | None:
+        cur = await self._conn.execute(
+            "SELECT holders_json, complete FROM holders_cache WHERE mint=? AND created_at >= ?",
+            (mint, time.time() - ttl_s),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        return [(o, int(a)) for o, a in json.loads(row[0])], bool(row[1])
+
+    async def put_holders(self, mint: str, holders: list[tuple[str, int]], complete: bool) -> None:
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO holders_cache (mint, holders_json, complete, created_at) VALUES (?,?,?,?)",
+            (mint, json.dumps(holders), int(complete), time.time()),
+        )
+        await self._conn.commit()
+
+    async def get_funder(self, wallet: str, ttl_s: float) -> tuple[bool, str | None]:
+        """(hit, funder). hit=True with funder=None means 'traced, none found' — STILL a cache hit."""
+        cur = await self._conn.execute(
+            "SELECT funder FROM wallet_funder WHERE wallet=? AND created_at >= ?",
+            (wallet, time.time() - ttl_s),
+        )
+        row = await cur.fetchone()
+        return (True, row[0]) if row else (False, None)
+
+    async def put_funder(self, wallet: str, funder: str | None) -> None:
+        await self._conn.execute(
+            "INSERT OR REPLACE INTO wallet_funder (wallet, funder, created_at) VALUES (?,?,?)",
+            (wallet, funder, time.time()),
+        )
+        await self._conn.commit()
+
+    async def prune_caches(
+        self, report_ttl_s: float, wallet_ttl_s: float, holders_ttl_s: float, funder_ttl_s: float
+    ) -> None:
+        """Delete expired cache rows (startup housekeeping) so the db file stays bounded."""
+        now = time.time()
+        for table, ttl in [
+            ("web_reports", report_ttl_s),
+            ("wallet_tx_summary", wallet_ttl_s),
+            ("holders_cache", holders_ttl_s),
+            ("wallet_funder", funder_ttl_s),
+        ]:
+            await self._conn.execute(f"DELETE FROM {table} WHERE created_at < ?", (now - ttl,))
         await self._conn.commit()

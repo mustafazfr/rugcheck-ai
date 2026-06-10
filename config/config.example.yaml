@@ -217,6 +217,27 @@ position:
 run:
   summary_every_s: 60          # emit a rolling FUNNEL summary line this often (observability)
 
+# ADR-046 — rugcheck.ai web product: persistent caches (repeat checks cost 0 Helius credits, across
+# restarts/workers), refresh-abuse guard, per-IP rate limits and a daily Helius sub-budget so the free
+# tier survives public traffic. All keyless; nothing here costs money.
+web:
+  report_ttl_s: 300            # L1 in-process report cache
+  report_db_ttl_s: 900         # L2 persistent report cache (SQLite)
+  min_refresh_interval_s: 60   # refresh=1 can't force a re-spend more often than this
+  wallet_summary_ttl_s: 129600 # 36h — deployer/buyer wallet tx summaries
+  holders_db_ttl_s: 1800       # persistent holder-set cache
+  funder_ttl_s: 604800         # 7d — a wallet's first SOL funder never changes
+  jupiter_first_deployer: true # use Jupiter devMints (free) before the 10cr Helius deployer call
+  helius_daily_budget: 15000   # web's own daily Helius credit cap (inside the monthly governor)
+  ab_enabled: true             # serve + measure the two frontend design variants (A lab / B case-file)
+  rate:
+    enabled: true
+    per_ip_burst: 8            # instant burst per IP (token bucket)
+    per_ip_refill_per_s: 0.25  # ≈15 sustained requests/min per IP
+    daily_unique_mints_per_ip: 40  # fresh (cache-miss) mints one IP may trigger per UTC day
+    max_tracked_ips: 10000
+    trust_proxy: false         # true behind a reverse proxy → honor the first X-Forwarded-For hop
+
 storage:
   db_path: "./solscout.db"
 
