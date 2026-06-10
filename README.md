@@ -1,78 +1,80 @@
-# SolScout
+# rugcheck.ai *(working name)*
 
-A **Solana meme-coin intelligence & paper-first trading bot**.
+A **free Solana token-forensics web app**. Paste a mint address → it runs the token through ~35
+on-chain + external checks and returns a forensic safety report in seconds:
 
-It watches newly launched tokens, filters scams on-chain, verifies the project's social identity
-(is the linked Twitter real? bot followers? account age? handle recycled from dead coins? is there a
-real community?), checks whether proven-profitable wallets are buying, then runs a **deterministic
-"worth buying?" decision** and can place trades — **paper-traded by default**.
+- **0–100 safety score** + a **SAFE / CAUTION / DANGER / CRITICAL** verdict
+- authorities (mint/freeze), liquidity & LP lock, holder concentration, real-activity floor
+- **manipulation forensics**: wash-trading, one-way flow, hyper-pumps, low float, ticker impersonation
+- **bundle & insider detection**: shared-funder sybil clusters, RugCheck insider networks,
+  **deployer-and-buyers-funded-by-the-same-wallet** (the strongest rug pattern)
+- **"Who's behind it" OSINT**: deployer wallet history (prior launches, funding, age), top buyers'
+  wallet profiles (fresh-sybil detection), **Twitter/X timeline forensics** (serial CA-shilling,
+  forged account-creation dates via snowflake IDs, posting-cadence bot tells), website domain age
+- **3-source consensus**: RugCheck.xyz + GoPlus + Jupiter (organicScore, audit, verified list)
+- **honeypot sell-simulation** (Jupiter round-trip quote)
+- an **AI analyst** paragraph that cites the actual findings (Groq/Ollama; prompt-injection-hardened;
+  the verdict itself is always the deterministic rule engine — never the LLM)
 
-> ⚠️ **Reality check.** This operates in one of the most adversarial, negative-sum markets there is.
-> Roughly 98% of these tokens go to zero. The bot's edge is *defensive* (avoid rugs) and *imitative*
-> (follow proven smart money) — **not** out-sniping MEV bots. **Default mode is paper. Do not risk
-> money you can't lose, and only go live after the paper-validation gate is cleared.** Not financial advice.
+Two interchangeable frontends ship A/B: **A "forensic crypto lab"** (dark neon terminal) and
+**B "the case file"** (paper dossier with rubber stamps). Visitors are split 50/50; `GET /api/ab`
+reports which design drives more scans.
 
-## How it works (funnel)
+> ⚠️ **Honesty over hype.** ~98% of fresh meme tokens go to zero. This is a *defensive screener* —
+> it catches the patterns above, but no screen catches every scam. DYOR. Not financial advice.
 
-`Ingest → Hard rug filters → Social/OSINT enrichment → Smart-money check → LLM synthesis (Qwen) →
-Deterministic score & decision → Execution (paper/live) → Position management`
-
-The LLM (local Ollama `qwen2.5`) only **summarizes and scores text** — it never makes the buy/sell
-decision. That is a transparent, auditable rule engine.
-
-See [`docs/`](./docs) for the full design, decisions, and backup plan.
-
-## Quick start (after the development phase)
+## Run it
 
 ```bash
 # 1. Install uv (https://docs.astral.sh/uv/), then:
 uv python install 3.12
-uv sync                          # creates the venv, installs deps
+uv sync
 
-# 2. Configure
+# 2. Configure (free stack — only HELIUS_API_KEY needed, free tier)
 cp config/config.example.yaml config/config.yaml
-cp config/.env.example .env      # fill in API keys (Helius etc.); never commit this
+cp config/.env.example .env      # add HELIUS_API_KEY; never commit .env
 
-# 3. Make sure Ollama is running with the model
-ollama serve &
-ollama pull qwen2.5
+# 3. Optional: local AI analyst
+ollama serve & ollama pull qwen2.5:14b     # or set GROQ_API_KEY (free) in .env instead
 
-# 4. Analyze a single token (read-only, always safe)
-uv run solscout report <TOKEN_MINT_ADDRESS>
+# 4. Serve
+make web                          # = uv run solscout serve → http://127.0.0.1:8000
 ```
 
-## Shortcuts (no need to memorize commands)
+`?v=a` / `?v=b` forces a design; the footer link switches too.
+
+## Costs: $0
+
+The entire stack is **free/keyless**: DexScreener, GeckoTerminal, RugCheck, GoPlus, Jupiter,
+fxtwitter, Twitter syndication, RDAP, public Solana RPC. The only metered dependency is the **Helius
+free tier** (1M credits/mo), protected three ways: persistent SQLite caches (repeat checks cost 0,
+across restarts), a daily web sub-budget, and per-IP rate limits + a daily fresh-mint ledger.
+The LLM is local Ollama in dev or Groq's free tier in production. See `docs/DATA_SOURCES.md`.
+
+## Heritage: the trading engine
+
+The analysis engine grew out of a **paper-first trading bot** (SolScout). Those paths (`scoring/`,
+`execution/`, `portfolio/`, the `run`/`discover` loops, the smart-money watchlist) still live in the
+repo and still work, but the web product doesn't use them. Live trading is scaffolded and **locked**
+behind two flags + an Edge-Validation Gate — paper is the default, always.
 
 ```bash
-make setup            # one-time: Python 3.12 + deps + config/.env from examples
-make add WALLET=<addr> # seed a smart-money wallet (do this or the bot rarely BUYs!)
-make up               # start bot loop + dashboard in the background (PAPER)
-make status           # are they running? + recent log
-make stats            # paper performance summary (PnL, win-rate, …)
-make down             # stop everything
-make logs             # follow the bot log
+uv run solscout report <MINT>     # engine report in the terminal (read-only)
+make up / make stats / make down  # dormant paper-trading loops, if you ever want them
 ```
-Dashboard: <http://localhost:8787> (auto-refreshing). Run `make help` for all targets.
-
-**Always-on (macOS):** `make install-service` keeps the bot alive 24/7 (restarts on crash, starts at
-login) via launchd — paper mode, safe. `make uninstall-service` removes it.
-
-> ⚠️ With an **empty watchlist** the positive gate can't open, so the bot almost never BUYs and collects
-> little trade data. Seed wallets with `make add WALLET=<addr>` first — `make stats` / the dashboard warn
-> you when the watchlist is empty.
-
-## Status
-
-Paper bot is **feature-complete**: full funnel + autonomous paper buy/manage + grace-period re-eval +
-continuous `run` loop + analytics/dashboard. Live execution (`LiveExecutor`) is **scaffolded but locked**
-behind two flags and stays off until the paper Edge-Validation Gate is cleared.
 
 ## Layout
 
 | Path | What |
 |------|------|
-| `docs/ARCHITECTURE.md` | Full pipeline + scoring formula |
-| `docs/DECISIONS.md` | Why each choice was made (ADR log) |
-| `docs/BACKUP_PLAN.md` | Fallbacks, cost tiers, edge-validation gate, safety rails |
-| `docs/DATA_SOURCES.md` | Every external API: cost, limits, auth, fallback |
-| `src/solscout/` | Source (one folder per pipeline stage) |
+| `src/solscout/web/` | **The product**: FastAPI + OSINT + pure report builder + both frontends |
+| `src/solscout/data/` | One client per external API (retry/throttle/cache; nothing else hits the network) |
+| `docs/DECISIONS.md` | ADR-001…046 — every design decision and *why* |
+| `docs/DATA_SOURCES.md` | Every dependency: cost, auth, fallback |
+| `tests/` | 255 passing — the pure layers (filters/scoring/report/osint) are required to be tested |
+
+## Tests
+
+```bash
+uv run pytest -q && uv run ruff check src/ tests/
+```

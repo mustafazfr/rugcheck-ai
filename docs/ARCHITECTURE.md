@@ -1,7 +1,34 @@
 # Architecture
 
+## The product today — rugcheck.ai web app (ADR-040…046)
+
+The shipped product is a **web forensics report**, not the trading funnel. One request runs:
+
+```
+GET /api/check/{mint}
+  → per-IP rate limit (web/ratelimit.py)          429 {error, scope, retry_after_s}
+  → L1 in-process cache → L2 SQLite cache          repeat checks = 0 Helius credits, restart-safe
+  → singleflight (concurrent same-mint = 1 run)
+  → pipeline.analyze        market · authorities · holders · manipulation · RugCheck · GoPlus
+  → web/osint.gather        Jupiter token intel · X profile + tweet timeline · RDAP site age ·
+                            deployer + top-buyer wallet summaries (all SQLite-cached, 36h)
+  → web/report.build_report flags → severity tiers → 0-100 score + level + ~35 checks   [pure]
+  → llm/analyst             Groq (key set) | Ollama | rules — commentary only, injection-guarded
+  → cache + A/B counter → JSON
+```
+
+Cost model: the only metered dependency is the Helius free tier — bounded by a monthly pace
+governor, a daily web sub-budget (`web.helius_daily_budget`) and a per-IP daily fresh-mint ledger.
+Everything else (DexScreener, GeckoTerminal, RugCheck, GoPlus, Jupiter, fxtwitter, syndication,
+RDAP, public RPC, Groq free tier) is keyless/free. See `docs/DATA_SOURCES.md`.
+
+---
+
+## Heritage: the trading funnel (the engine the product reuses)
+
 SolScout is a **staged funnel**. Each stage enriches or rejects a token. Cheap, deterministic,
 on-chain checks run first so we discard ~95% of candidates before spending API quota or LLM time.
+The trading stages (S5–S7) are dormant in the web product but still tested and runnable.
 
 Every stage is implemented as `input dataclass → output dataclass` so any stage can be unit-tested
 and replayed from stored fixtures.
@@ -57,12 +84,11 @@ and replayed from stored fixtures.
 
 ## Stage 0 — Ingest
 
-**Two independent triggers feed the same funnel:**
+**Free/keyless candidate stream (ADR-036 — pump.fun is removed):**
 
-1. **New-launch stream** — subscribe to PumpPortal's free WebSocket (`new token` events) and/or a
-   Helius/Geyser stream. Emits `(mint, creator, timestamp, initial_liquidity)`.
-2. **Smart-money trigger** — Helius webhooks on a watchlist of profitable wallets. When a watched
-   wallet buys *anything*, that token enters the funnel with a head-start flag.
+1. **GeckoTerminal `new_pools`** — fresh DEX listings, liquidity pre-screened before any Helius credit.
+2. **DexScreener promoted/boosted tokens** — paid-promotion listings worth screening.
+3. *(web product)* whatever mint the user pastes.
 
 Output: `TokenCandidate{mint, source, discovered_at, raw_meta}`.
 
@@ -84,17 +110,19 @@ Output: `FilterResult{passed: bool, hard_flags: [...], metrics: {...}}`. Any har
 
 ## Stage 2 — Enrich (social / OSINT)
 
-Only for Stage-1 survivors. This is the "what kind of project is this" layer the user asked for.
+Only for Stage-1 survivors. This is the "what kind of project is this" layer — all FREE (ADR-041/046):
 
 - **Socials discovery:** DexScreener / token metadata → Twitter handle, Telegram, website.
-- **Twitter authenticity (via TweetScout API — don't rebuild Twitter intel):**
-  - account **age** (days-old account = red flag)
-  - **handle-reuse history** ← *highest-signal check*: has this account been attached to other
-    (dead/rugged) tokens? did it recently rename? Scammers recycle accounts.
-  - **follower quality / bot ratio** and **notable followers** (recognized KOLs following = signal)
-  - **CA-in-tweet proof:** did the linked account actually tweet the contract address? If not, the
-    "official" link is likely borrowed/fake.
-- **Telegram (Telethon):** member count, message velocity, **unique-speaker ratio** vs copy-paste spam.
+- **Twitter authenticity (fxtwitter + syndication SSR, keyless):**
+  - account **age / followers / verified** → deterministic authenticity verdict
+  - **snowflake-ID forgery check:** the user-id encodes the REAL creation date — a mismatch with the
+    claimed join date = recycled/forged identity
+  - **tweet-timeline forensics:** recent tweet TEXTS → serial CA-shilling (pushes other token mints),
+    **CA-in-tweet proof** (did the account actually post this mint? — young tokens only),
+    posting-cadence bot tells, bio-website ↔ token-website match
+  - *(TweetScout remains an optional paid upgrade for handle-reuse counts; not required)*
+- **Website domain age (RDAP, keyless):** a site registered days before launch = throwaway tell.
+- **Telegram (public web, NO login):** subscriber count + recent public messages.
 
 Output: `SocialReport{twitter_age_days, handle_reuse_count, follower_quality, notable_followers,
 ca_tweet_verified, tg_unique_speakers, raw_texts_for_llm, social_flags: [...]}`.

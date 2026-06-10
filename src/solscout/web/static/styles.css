@@ -132,7 +132,19 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .verdict-main{min-width:0}
 .badge{display:inline-block;font-family:var(--disp);font-weight:700;letter-spacing:.12em;font-size:15px;
   padding:7px 16px;border-radius:8px;border:1.5px solid var(--verdict);color:var(--verdict);
-  background:var(--verdict-soft);margin-bottom:14px}
+  background:var(--verdict-soft);margin-bottom:14px;
+  animation:neon-on .9s steps(1) .25s backwards}  /* a faulty neon sign flickering awake */
+@keyframes neon-on{
+  0%{opacity:0}8%{opacity:1}12%{opacity:.25}18%{opacity:1}26%{opacity:.4}32%{opacity:1}100%{opacity:1}}
+.verdict-wrap{--sweep:0}
+.verdict-wrap > *{position:relative;z-index:1}
+/* one diagnostic sweep across the verdict card when the result lands */
+.verdict-wrap::before{animation:vsweep 1.4s ease-out .15s}
+@keyframes vsweep{
+  0%{background:linear-gradient(105deg,transparent 0%,var(--verdict-soft) 4%,transparent 8%) -40% 0/300% 100% no-repeat,
+     radial-gradient(420px 200px at 12% 0%,var(--verdict-soft),transparent 70%)}
+  100%{background:linear-gradient(105deg,transparent 0%,var(--verdict-soft) 4%,transparent 8%) 140% 0/300% 100% no-repeat,
+     radial-gradient(420px 200px at 12% 0%,var(--verdict-soft),transparent 70%)}}
 .token-id{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}
 .t-name{font-family:var(--disp);font-weight:600;font-size:26px}
 .t-sym{color:var(--lime);font-size:14px;letter-spacing:.06em}
