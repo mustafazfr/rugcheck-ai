@@ -18,7 +18,16 @@ import asyncio
 from datetime import datetime, timezone
 
 from ..core.logging import get_logger
-from ..data.twitter_public import authenticity, handle_from_url
+from ..data.rdap import registrable_domain, registration_age_days
+from ..data.twitter_public import (
+    authenticity,
+    handle_from_url,
+    id_joined_mismatch_days,
+    pick_excerpts,
+    posting_cadence,
+    tweet_ca_signals,
+    website_matches,
+)
 from ..enrich.cluster import dominant_funder
 from ..enrich.discovery import looks_like_trader, wallet_swap_summary
 from ..enrich.smartmoney import count_prior_creations
@@ -81,7 +90,7 @@ def _twitter_url(market) -> str | None:
     return None
 
 
-async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup=None) -> dict:
+async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup=None, rdap=None) -> dict:
     out: dict = {"flags": []}
     helius_on = getattr(helius, "available", False)
     wallet_ttl = cfg.web.wallet_summary_ttl_s
@@ -115,17 +124,67 @@ async def gather(a, cfg, *, rc=None, gp=None, helius=None, tw=None, db=None, jup
                 "age_days": p.age_days, "verified": p.verified,
                 "description": (p.description or "")[:200], "avatar_url": p.avatar_url,
                 "score": score, "verdict": verdict, "flags": tflags,
+                "user_id": p.user_id, "website": p.website,
             }
             if verdict == "inauthentic":
                 out["flags"].append("twitter_inauthentic")
             elif verdict == "weak":
                 out["flags"].append("twitter_weak")
+            # — identity forgery: the snowflake id encodes the REAL creation date — compare to the claim —
+            mism = id_joined_mismatch_days(p.user_id, p.age_days)
+            if mism is not None:
+                out["twitter"]["id_joined_mismatch_days"] = mism
+                if mism > cfg.twitter.id_mismatch_tolerance_days:
+                    out["flags"].append("twitter_id_mismatch")
+            # — bio website vs the token's listed websites —
+            wm = website_matches(p.website, (a.market.websites if a.market else None))
+            out["twitter"]["website_match"] = wm
+            if wm is False:
+                out["flags"].append("twitter_site_mismatch")
+            # — timeline forensics (ADR-046): recent tweet TEXTS, free via syndication SSR —
+            if cfg.twitter.timeline_enabled:
+                tl = await _safe(tw.timeline(p.handle), "twitter-timeline") or []
+                if tl:
+                    sig = tweet_ca_signals(tl, a.mint)
+                    cad = posting_cadence(tl)
+                    out["twitter"]["timeline"] = {
+                        "count": cad["count"], "mint_mentions": sig["mint_mentions"],
+                        "other_ca_count": sig["other_ca_count"], "per_day": cad["per_day"],
+                        "burst_max_1h": cad["burst_max_1h"],
+                        "last_tweet_age_days": cad["last_tweet_age_days"],
+                        "excerpts": pick_excerpts(tl, a.mint, cfg.twitter.excerpt_count,
+                                                  cfg.twitter.excerpt_len),
+                    }
+                    if sig["other_ca_count"] >= cfg.twitter.serial_shill_min:
+                        out["flags"].append("twitter_serial_shill")
+                    # "never posted our CA" only means something for a YOUNG token — an established
+                    # project (BONK, 3y) has no reason to keep tweeting its mint.
+                    pair_age_days = None
+                    if a.market and a.market.pair_created_at:
+                        pair_age_days = (datetime.now(timezone.utc) - a.market.pair_created_at).days
+                    if (sig["mint_mentions"] == 0
+                            and cad["count"] >= cfg.twitter.min_tweets_for_ca_check
+                            and pair_age_days is not None
+                            and pair_age_days <= cfg.twitter.ca_check_max_age_days):
+                        out["flags"].append("twitter_no_ca_mention")
+                    if (cad["burst_max_1h"] or 0) >= cfg.twitter.burst_max_1h:
+                        out["flags"].append("twitter_burst_posting")
         else:
             out["twitter"] = {"available": False, "handle": handle, "url": f"https://x.com/{handle}"}
             out["flags"].append("twitter_weak")
     else:
         out["twitter"] = {"available": False, "handle": None, "linked": False}
         out["flags"].append("no_twitter")
+
+    # — project website's domain age (RDAP, ADR-046): a site registered days ago = throwaway tell —
+    if rdap is not None and cfg.rdap.enabled and a.market and a.market.websites:
+        pair = next(((w, d) for w in a.market.websites for d in [registrable_domain(w)] if d), None)
+        if pair:
+            url, dom = pair
+            age = registration_age_days(await _safe(rdap.domain(dom), "rdap"))
+            out["website"] = {"url": url, "domain": dom, "age_days": age}
+            if age is not None and age < cfg.rdap.min_domain_age_days:
+                out["flags"].append("website_brand_new")
 
     # — RugCheck (for creator) + GoPlus, both cached from the analyze pass —
     rc_rep = await _safe(rc.report(a.mint), "rugcheck") if rc else None

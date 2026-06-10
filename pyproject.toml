@@ -5,7 +5,7 @@ description = "Solana meme-coin intelligence & paper-first trading bot"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"   # NOT 3.14: Solana libs lack wheels (see docs/DECISIONS.md ADR-002)
 dependencies = [
-    "httpx>=0.27",            # async HTTP for all data/ clients
+    "httpx[http2]>=0.27",            # async HTTP for all data/ clients
     "websockets>=12",         # PumpPortal / Helius streams
     "pydantic>=2.7",          # models + LLM structured-output validation
     "pydantic-settings>=2.3", # .env loading

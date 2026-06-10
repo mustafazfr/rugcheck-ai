@@ -30,6 +30,7 @@ from ..data.geckoterminal import GeckoTerminalClient
 from ..data.goplus import GoPlusClient
 from ..data.helius import HeliusClient
 from ..data.jupiter import JupiterClient
+from ..data.rdap import RdapClient
 from ..data.rugcheck import RugCheckClient
 from ..data.solana_rpc import SolanaRpcClient
 from ..data.telegram_web import TelegramWebClient
@@ -117,11 +118,12 @@ async def lifespan(app: FastAPI):
             RugCheckClient() as rc,
             GoPlusClient() as gp,
             TwitterPublicClient() as twp,
+            RdapClient() as rdap,
             TelegramWebClient() as tg,
             TweetScoutClient(secrets.tweetscout_api_key) as ts,
         ):
             app.state.clients = dict(dex=dex, gecko=gecko, rpc=rpc, helius=helius, jup=jup,
-                                     rc=rc, gp=gp, twp=twp, tg=tg, ts=ts)
+                                     rc=rc, gp=gp, twp=twp, rdap=rdap, tg=tg, ts=ts)
             app.state.helius_on = bool(secrets.helius_api_key)
             app.state.groq_key = secrets.groq_api_key  # optional; analyst uses it when set, else local Ollama
             log.info("rugcheck.ai up — helius=%s · analyst=%s", app.state.helius_on,
@@ -192,7 +194,7 @@ async def _run_analysis(mint: str) -> dict:
     )
     # deep OSINT (twitter + deployer + buyer wallets + source consensus) — best-effort, never fatal
     osint = await osint_mod.gather(
-        a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"], db=db, jup=c["jup"]
+        a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"], db=db, jup=c["jup"], rdap=c["rdap"]
     ) or {}
     report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
     # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is

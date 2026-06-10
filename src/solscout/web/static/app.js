@@ -289,7 +289,29 @@ function renderTwitter(tw) {
     `<div><b>${_compact(tw.tweets)}</b><span>tweets</span></div>` +
     `<div><b>${tw.age_days != null ? (tw.age_days >= 365 ? Math.floor(tw.age_days / 365) + "y" : tw.age_days + "d") : "—"}</b><span>age</span></div>` +
     `</div>` +
+    _twTimeline(tw) +
     `<div class="ai mtr" style="margin-top:12px"><div class="k"><span>identity authenticity</span><span>${Math.round((tw.score || 0) * 100)}</span></div><div class="t"><div class="f" style="width:${Math.round((tw.score || 0) * 100)}%;background:${V}"></div></div></div>`;
+}
+
+// timeline forensics (ADR-046): what the account has actually been TWEETING — shill/CA/cadence tells
+function _twTimeline(tw) {
+  const tl = tw.timeline;
+  let rows = "";
+  if (tl && tl.count) {
+    const shill = tl.other_ca_count >= 3;
+    rows += `<div class="kv"><span class="k">recent tweets read</span><span>${tl.count}${tl.per_day ? ` · ~${tl.per_day}/day` : ""}</span></div>`;
+    rows += `<div class="kv"><span class="k">posts this CA</span><span>${tl.mint_mentions ? `yes · ${tl.mint_mentions}×` : "never ⚠"}</span></div>`;
+    rows += `<div class="kv"><span class="k">other token CAs shilled</span><span style="${shill ? "color:var(--red)" : ""}">${tl.other_ca_count}${shill ? " ⚑ serial shill" : ""}</span></div>`;
+  }
+  if (tw.id_joined_mismatch_days != null && tw.id_joined_mismatch_days > 30) {
+    rows += `<div class="kv"><span class="k">identity metadata</span><span style="color:var(--red)">forged join date ⚑ (off by ${tw.id_joined_mismatch_days}d)</span></div>`;
+  }
+  if (tw.website_match === false) {
+    rows += `<div class="kv"><span class="k">bio website</span><span style="color:var(--amber)">doesn't match token's site ⚠</span></div>`;
+  } else if (tw.website_match === true) {
+    rows += `<div class="kv"><span class="k">bio website</span><span>matches token's site ✓</span></div>`;
+  }
+  return rows ? `<div class="tw-tl" style="margin-top:10px">${rows}</div>` : "";
 }
 
 function _compact(v) { if (v == null) return "—"; if (v < 1000) return "" + v; if (v < 1e6) return (v / 1e3).toFixed(1) + "K"; return (v / 1e6).toFixed(1) + "M"; }

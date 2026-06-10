@@ -278,13 +278,31 @@ class GoPlusCfg(BaseModel):
 
 class TwitterCfg(BaseModel):
     """ADR-041 — keyless Twitter/X profile intel (fxtwitter). Account age / followers / tweets = real
-    authenticity signals (scammers reuse brand-new, low-follower, no-tweet accounts)."""
+    authenticity signals (scammers reuse brand-new, low-follower, no-tweet accounts).
+    ADR-046 adds the free TIMELINE read (syndication SSR) → CA-shill / cadence / identity-forgery signals."""
 
     enabled: bool = True
     min_age_days: int = 30  # younger than this = brand-new account flag
     mature_age_days: int = 365  # age contribution saturates here
     min_followers: int = 500
     min_tweets: int = 20
+    # — timeline forensics (ADR-046) —
+    timeline_enabled: bool = True
+    serial_shill_min: int = 3  # ≥ this many DISTINCT other token CAs in recent tweets → serial shill
+    min_tweets_for_ca_check: int = 5  # need at least this many readable tweets before "never posted our CA" means anything
+    ca_check_max_age_days: int = 30  # "never posted our CA" only matters for YOUNG tokens (BONK won't re-tweet its CA)
+    id_mismatch_tolerance_days: int = 30  # snowflake-id age vs claimed joined age may differ by this much
+    burst_max_1h: int = 20  # more tweets than this inside one hour = bot-cadence tell
+    excerpt_count: int = 3  # tweet excerpts handed to the AI analyst (each <data>-fenced)
+    excerpt_len: int = 140
+
+
+class RdapCfg(BaseModel):
+    """ADR-046 — project-website domain age via RDAP (keyless, the registries' own protocol). A site
+    registered days before the token launched is a classic throwaway-rug tell. Soft signal, fail-open."""
+
+    enabled: bool = True
+    min_domain_age_days: int = 14  # younger than this → website_brand_new soft flag
 
 
 class DeployerCfg(BaseModel):
@@ -358,6 +376,7 @@ class Config(BaseModel):
     rugcheck: RugCheckCfg = Field(default_factory=RugCheckCfg)
     goplus: GoPlusCfg = Field(default_factory=GoPlusCfg)
     twitter: TwitterCfg = Field(default_factory=TwitterCfg)
+    rdap: RdapCfg = Field(default_factory=RdapCfg)
     deployer: DeployerCfg = Field(default_factory=DeployerCfg)
     social: SocialCfg = Field(default_factory=SocialCfg)
     smart_money: SmartMoneyCfg = Field(default_factory=SmartMoneyCfg)

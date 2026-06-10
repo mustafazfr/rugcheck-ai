@@ -144,6 +144,15 @@ twitter:
   mature_age_days: 365
   min_followers: 500
   min_tweets: 20
+  # — timeline forensics (ADR-046): recent tweets read FREE via the public syndication SSR page —
+  timeline_enabled: true
+  serial_shill_min: 3                # >= this many DISTINCT other token CAs tweeted → serial shill (DANGER)
+  min_tweets_for_ca_check: 5         # need this many readable tweets before "never posted our CA" counts
+  ca_check_max_age_days: 30          # the no-CA-tweet tell only applies to YOUNG tokens
+  id_mismatch_tolerance_days: 30     # snowflake-id age vs claimed join age beyond this → forged identity
+  burst_max_1h: 20                   # more tweets than this within one hour = bot-cadence tell
+  excerpt_count: 3                   # tweet excerpts fed to the AI analyst (each <data>-fenced)
+  excerpt_len: 140
 deployer:
   enabled: true
   tx_limit: 100                      # creator wallet enhanced-tx depth
@@ -216,6 +225,12 @@ position:
 
 run:
   summary_every_s: 60          # emit a rolling FUNNEL summary line this often (observability)
+
+# ADR-046 — project-website domain age via RDAP (keyless; rdap.org → the registry's own server).
+# A site registered days before launch is a throwaway-rug tell. Soft signal, fail-open.
+rdap:
+  enabled: true
+  min_domain_age_days: 14      # younger than this → website_brand_new soft flag
 
 # ADR-046 — rugcheck.ai web product: persistent caches (repeat checks cost 0 Helius credits, across
 # restarts/workers), refresh-abuse guard, per-IP rate limits and a daily Helius sub-budget so the free

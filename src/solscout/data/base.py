@@ -28,8 +28,11 @@ class BaseClient:
         min_interval_s: float = 0.0,  # simple per-client throttle between requests
         cache_ttl_s: float = 0.0,  # 0 disables caching
         headers: dict[str, str] | None = None,
+        follow_redirects: bool = False,  # rdap.org 302s to the registry's RDAP server (ADR-046)
     ):
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout, headers=headers or {})
+        self._client = httpx.AsyncClient(
+            base_url=base_url, timeout=timeout, headers=headers or {}, follow_redirects=follow_redirects
+        )
         self._min_interval = min_interval_s
         self._last_call = 0.0
         self._lock = asyncio.Lock()

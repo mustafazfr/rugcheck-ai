@@ -47,6 +47,9 @@ DANGER_FLAGS = {
     "deployer_fresh_funded",
     "fresh_buyer_cluster",
     "twitter_inauthentic",
+    # timeline forensics (ADR-046): pumping many OTHER token CAs / forged identity metadata = active deception
+    "twitter_serial_shill",
+    "twitter_id_mismatch",
 }
 SOFT_FLAGS = {
     "high_turnover", "txn_imbalance", "low_float", "rugcheck_elevated", "llm_rug",
@@ -58,6 +61,9 @@ SOFT_FLAGS = {
     # Jupiter consensus (ADR-046): their organic detector disagreeing, or sources disagreeing about
     # authorities, is a nudge — our own deterministic checks remain the hard authority.
     "jupiter_low_organic", "authority_consensus_mismatch",
+    # timeline heuristics (ADR-046): suggestive, not proof
+    "twitter_no_ca_mention", "twitter_site_mismatch", "twitter_burst_posting",
+    "website_brand_new",
 }
 
 LEVELS = ("SAFE", "CAUTION", "DANGER", "CRITICAL")
@@ -145,6 +151,7 @@ def build_report(a, cfg, *, osint: dict | None = None, took_ms: int | None = Non
         ),
         # deep OSINT (ADR-041) — the project's Twitter, the deployer's wallet, the buyers' wallets, consensus
         "twitter": osint.get("twitter"),
+        "website": osint.get("website"),
         "deployer": osint.get("deployer"),
         "holders_intel": osint.get("holders_intel"),
         "sources": osint.get("sources"),
@@ -383,6 +390,39 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
                           "fail" if has("twitter_inauthentic") else ("warn" if v in ("weak",) else "pass"),
                           f"@{tw.get('handle')} · {_tw_age(tw.get('age_days'))} · {_compact(tw.get('followers'))} followers"
                           + (" · verified" if tw.get("verified") else "")))
+        # — timeline forensics (ADR-046) — only when the timeline was actually readable —
+        tl = tw.get("timeline") or {}
+        if tl.get("count"):
+            oc = tl.get("other_ca_count", 0)
+            out.append(_check("tw_shill", "Account isn't a serial token-shiller", "Social & AI",
+                              "fail" if has("twitter_serial_shill") else "pass",
+                              (f"Recent tweets push {oc} OTHER token CAs — pumps token after token"
+                               if has("twitter_serial_shill")
+                               else f"{oc} other token CAs in recent tweets")))
+            mm = tl.get("mint_mentions", 0)
+            out.append(_check("tw_ca", "Account actually posted this token", "Social & AI",
+                              "warn" if has("twitter_no_ca_mention") else "pass",
+                              (f"This mint never appears in {tl['count']} recent tweets — account may be unrelated/hijacked"
+                               if has("twitter_no_ca_mention")
+                               else f"Mentions this mint {mm}× in recent tweets" if mm
+                               else "Not in recent tweets (normal for an established token)")))
+            if tl.get("burst_max_1h") is not None:
+                out.append(_check("tw_cadence", "Posting cadence looks human", "Social & AI",
+                                  "warn" if has("twitter_burst_posting") else "pass",
+                                  (f"{tl['burst_max_1h']} tweets inside one hour — bot-like burst"
+                                   if has("twitter_burst_posting")
+                                   else f"~{tl.get('per_day') or '?'} tweets/day · last {tl.get('last_tweet_age_days', '?')}d ago")))
+        if tw.get("id_joined_mismatch_days") is not None:
+            out.append(_check("tw_id", "Account creation date checks out", "Social & AI",
+                              "fail" if has("twitter_id_mismatch") else "pass",
+                              (f"Snowflake-ID date differs from the claimed join date by {tw['id_joined_mismatch_days']}d — forged/recycled identity"
+                               if has("twitter_id_mismatch")
+                               else "ID-derived creation date matches the profile")))
+        if tw.get("website_match") is not None:
+            out.append(_check("tw_site", "Bio website matches the token's site", "Social & AI",
+                              "warn" if has("twitter_site_mismatch") else "pass",
+                              ("X bio links a DIFFERENT site than the token lists — possibly someone else's account"
+                               if has("twitter_site_mismatch") else "Same website on both sides")))
     elif tw.get("linked") is False:
         out.append(_check("tw", "Twitter/X linked", "Social & AI", "warn", "No Twitter/X account linked on DexScreener"))
     if a.social and a.social.handle_reuse_count:
@@ -390,7 +430,22 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
                           "fail" if has("twitter_handle_reuse") else "pass",
                           f"Handle attached to {a.social.handle_reuse_count} other tokens"))
 
+    # — project website domain age (RDAP, ADR-046) —
+    ws = (osint.get("website") or {})
+    if ws.get("domain"):
+        age = ws.get("age_days")
+        out.append(_check("site_age", "Project website isn't a throwaway", "Social & AI",
+                          "warn" if has("website_brand_new") else ("pass" if age is not None else "skip"),
+                          (f"{ws['domain']} registered only {age}d ago — throwaway-domain tell"
+                           if has("website_brand_new")
+                           else (f"{ws['domain']} registered {_dom_age(age)} ago" if age is not None
+                                 else f"{ws['domain']} — registry didn't answer (RDAP)"))))
+
     return out
+
+
+def _dom_age(d):
+    return f"{d // 365}y" if d >= 365 else f"{d}d"
 
 
 def _tw_age(d):
