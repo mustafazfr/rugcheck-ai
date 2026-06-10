@@ -72,7 +72,11 @@ async function run(mint) {
     $("#scanning").hidden = true;
     if (!res.ok || data.error) {
       $("#hero").hidden = false;
-      err.textContent = "✕ " + (data.detail || "Could not analyze this token right now. Try again.");
+      let msg = data.detail || "Could not analyze this token right now. Try again.";
+      if (res.status === 429 && data.retry_after_s && data.scope === "burst") {
+        msg = `Rate limit — wait ~${data.retry_after_s}s and try again.`;
+      }
+      err.textContent = "✕ " + msg;
       err.hidden = false;
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;

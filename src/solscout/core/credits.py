@@ -19,6 +19,11 @@ def month_key(now: datetime | None = None) -> str:
     return now.strftime("%Y-%m")
 
 
+def day_key(now: datetime | None = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%d")
+
+
 def month_bounds(now: datetime) -> tuple[datetime, datetime]:
     start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     days = calendar.monthrange(now.year, now.month)[1]
@@ -59,3 +64,47 @@ class CreditGovernor:
 
     def remaining(self) -> float:
         return max(0.0, self.budget - self.used)
+
+
+class DailyCap:
+    """ADR-046 — a fixed credit budget per UTC DAY (the web product's sub-budget inside the monthly
+    governor). Rolls over automatically at midnight UTC; `used` is reseeded from the db at startup.
+    Duck-typed like CreditGovernor (can_spend/note/remaining) so HeliusClient needs no changes."""
+
+    def __init__(self, budget: float, used: float = 0.0, now: datetime | None = None):
+        self.budget = float(budget)
+        self.used = float(used)
+        self._day = day_key(now)
+
+    def _roll(self, now: datetime | None = None) -> None:
+        d = day_key(now)
+        if d != self._day:
+            self._day, self.used = d, 0.0
+
+    def can_spend(self, cost: float, now: datetime | None = None) -> bool:
+        self._roll(now)
+        return self.used + cost <= self.budget
+
+    def note(self, cost: float) -> None:
+        self.used += cost
+
+    def remaining(self) -> float:
+        return max(0.0, self.budget - self.used)
+
+
+class CompositeGovernor:
+    """ALL member governors must agree before a spend; a spend is noted on all. Lets the web stack
+    enforce 'monthly pace AND daily cap' through the single governor slot HeliusClient already has."""
+
+    def __init__(self, *governors):
+        self.governors = [g for g in governors if g is not None]
+
+    def can_spend(self, cost: float, now: datetime | None = None) -> bool:
+        return all(g.can_spend(cost, now) for g in self.governors)
+
+    def note(self, cost: float) -> None:
+        for g in self.governors:
+            g.note(cost)
+
+    def remaining(self) -> float:
+        return min((g.remaining() for g in self.governors), default=0.0)

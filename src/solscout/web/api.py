@@ -15,14 +15,14 @@ import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .. import pipeline
 from ..core.config import load
 from ..llm import analyst
-from ..core.credits import CreditGovernor, month_key
+from ..core.credits import CompositeGovernor, CreditGovernor, DailyCap, day_key, month_key
 from ..core.db import Db
 from ..core.logging import get_logger
 from ..data.dexscreener import DexScreenerClient
@@ -36,6 +36,7 @@ from ..data.telegram_web import TelegramWebClient
 from ..data.tweetscout import TweetScoutClient
 from ..data.twitter_public import TwitterPublicClient
 from . import osint as osint_mod
+from .ratelimit import DailyMintLedger, IpLimiter
 from .report import build_report
 
 log = get_logger("solscout.web")
@@ -79,11 +80,25 @@ async def lifespan(app: FastAPI):
             cfg.web.holders_db_ttl_s, cfg.web.funder_ttl_s,
         )
         app.state.funder_store = _DbFunderStore(db, cfg.web.funder_ttl_s)
+        # per-IP abuse control (ADR-046): bursts + fresh-mints/day. Cached reports always serve.
+        rate = cfg.web.rate
+        app.state.limiter = (
+            IpLimiter(rate.per_ip_burst, rate.per_ip_refill_per_s, rate.max_tracked_ips)
+            if rate.enabled else None
+        )
+        app.state.mint_ledger = DailyMintLedger(rate.daily_unique_mints_per_ip) if rate.enabled else None
         mk = month_key()
-        gov = CreditGovernor(cfg.helius.monthly_budget_funnel, used=await db.get_credit_usage(mk))
+        # governor = monthly pace AND a daily web sub-budget — both persisted in credit_usage
+        # (month TEXT PK takes arbitrary keys, so `web:YYYY-MM-DD` rows need no migration).
+        daily = DailyCap(cfg.web.helius_daily_budget, used=await db.get_credit_usage("web:" + day_key()))
+        gov = CompositeGovernor(
+            CreditGovernor(cfg.helius.monthly_budget_funnel, used=await db.get_credit_usage(mk)),
+            daily,
+        )
 
         async def _spend(cost: float) -> None:
             await db.add_credit_usage(mk, cost)
+            await db.add_credit_usage("web:" + day_key(), cost)
 
         async with (
             DexScreenerClient() as dex,
@@ -115,6 +130,36 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="rugcheck.ai", version="1.0", lifespan=lifespan)
+
+
+def _client_ip(request: Request) -> str:
+    cfg = getattr(app.state, "cfg", None)
+    if cfg is not None and cfg.web.rate.trust_proxy:
+        xff = request.headers.get("x-forwarded-for")
+        if xff:
+            return xff.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def _429(scope: str, detail: str, retry_after_s: int) -> JSONResponse:
+    """The rate-limit response shape the frontend renders (`detail` + optional `retry_after_s`)."""
+    return JSONResponse(
+        {"error": "rate_limited", "scope": scope, "detail": detail, "retry_after_s": retry_after_s},
+        status_code=429,
+        headers={"Retry-After": str(retry_after_s)},
+    )
+
+
+@app.middleware("http")
+async def _rate_limit(request: Request, call_next):
+    limiter = getattr(app.state, "limiter", None)
+    path = request.url.path
+    if limiter is None or not path.startswith("/api/") or path == "/api/health":
+        return await call_next(request)
+    ok, retry = limiter.allow(_client_ip(request))
+    if not ok:
+        return _429("burst", f"Too many requests — slow down and retry in ~{retry}s.", retry)
+    return await call_next(request)
 
 
 @app.get("/api/health")
@@ -155,7 +200,7 @@ async def _run_analysis(mint: str) -> dict:
 
 
 @app.get("/api/check/{mint}")
-async def check(mint: str, refresh: bool = False):
+async def check(mint: str, request: Request, refresh: bool = False):
     mint = mint.strip()
     if not _B58.match(mint):
         return JSONResponse({"error": "invalid_mint", "detail": "Not a valid Solana mint address."}, status_code=400)
@@ -186,6 +231,16 @@ async def check(mint: str, refresh: bool = False):
                 status_code=502,
             )
         return {**report, "cached": True}
+
+    # this is genuinely NEW work → charge it to the caller's daily fresh-mint allowance (ADR-046).
+    # Cached/in-flight lookups above never reach this point, so normal browsing is unaffected.
+    ledger = getattr(app.state, "mint_ledger", None)
+    if ledger is not None and not ledger.allow(_client_ip(request), mint, day_key()):
+        return _429(
+            "daily_mints",
+            "Daily fresh-scan limit reached for your IP — already-scanned tokens still work. Resets at 00:00 UTC.",
+            3600,
+        )
 
     fut = asyncio.get_running_loop().create_future()
     inflight[mint] = fut

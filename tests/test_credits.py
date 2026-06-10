@@ -1,8 +1,16 @@
-"""Credit governor (ADR-022) — paces a monthly quota so it can't run out before month end."""
+"""Credit governor (ADR-022) — paces a monthly quota so it can't run out before month end.
+Plus the ADR-046 web additions: DailyCap (per-UTC-day sub-budget) and CompositeGovernor (all must agree)."""
 
 from datetime import datetime, timezone
 
-from solscout.core.credits import CreditGovernor, month_bounds, month_key
+from solscout.core.credits import (
+    CompositeGovernor,
+    CreditGovernor,
+    DailyCap,
+    day_key,
+    month_bounds,
+    month_key,
+)
 
 
 def _gov(budget, used, day, hour=0):
@@ -55,3 +63,47 @@ def test_head_start_buffer_allows_early_spend():
 
 def test_month_key_format():
     assert month_key(datetime(2026, 6, 3, tzinfo=timezone.utc)) == "2026-06"
+
+
+def test_day_key_format():
+    assert day_key(datetime(2026, 6, 3, 23, tzinfo=timezone.utc)) == "2026-06-03"
+
+
+# — ADR-046: DailyCap — a per-UTC-day sub-budget that rolls over at midnight —
+
+def test_daily_cap_blocks_at_budget_and_rolls_over():
+    d1 = datetime(2026, 6, 10, 12, tzinfo=timezone.utc)
+    cap = DailyCap(100, used=95, now=d1)
+    assert cap.can_spend(5, d1)
+    assert not cap.can_spend(6, d1)  # would exceed today's budget
+    d2 = datetime(2026, 6, 11, 0, 1, tzinfo=timezone.utc)
+    assert cap.can_spend(100, d2)  # new UTC day → fresh budget
+    assert cap.used == 0.0  # rollover wiped the counter
+
+
+def test_daily_cap_note_and_remaining():
+    cap = DailyCap(50, now=datetime(2026, 6, 10, tzinfo=timezone.utc))
+    cap.note(20)
+    assert cap.used == 20 and cap.remaining() == 30
+
+
+# — ADR-046: CompositeGovernor — monthly pace AND daily cap must BOTH agree —
+
+def test_composite_denies_when_any_member_denies():
+    now = datetime(2026, 6, 16, tzinfo=timezone.utc)
+    monthly = CreditGovernor(1_000_000, used=100_000, now=now, head_start=0.0)  # behind pace → allows
+    daily = DailyCap(100, used=100, now=now)  # exhausted today → denies
+    comp = CompositeGovernor(monthly, daily)
+    assert monthly.can_spend(10, now) and not daily.can_spend(10, now)
+    assert not comp.can_spend(10, now)
+
+
+def test_composite_notes_on_all_members_and_skips_none():
+    now = datetime(2026, 6, 16, tzinfo=timezone.utc)
+    monthly = CreditGovernor(1_000_000, used=0, now=now, head_start=0.0)
+    daily = DailyCap(1000, now=now)
+    comp = CompositeGovernor(monthly, None, daily)  # None members are dropped
+    assert comp.can_spend(10, now)
+    comp.note(10)
+    assert monthly.used == 10 and daily.used == 10
+    assert comp.remaining() == daily.remaining()  # min of members
