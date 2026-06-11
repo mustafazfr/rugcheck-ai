@@ -87,6 +87,16 @@ CREATE TABLE IF NOT EXISTS ab_events (
     count INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, variant, event)
 );
+-- ADR-047 PRO pass (non-custodial one-time payment → lifetime unlimited scans for that wallet).
+-- `sig UNIQUE` is the replay lock: one on-chain transaction can ever redeem one pass. Paid intents
+-- are kept forever (they ARE the revenue ledger); only stale pending ones get pruned.
+CREATE TABLE IF NOT EXISTS pay_intents (
+    intent_id TEXT PRIMARY KEY, reference TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+    wallet TEXT, sig TEXT UNIQUE, lamports INTEGER, created_at REAL NOT NULL, paid_at REAL
+);
+CREATE TABLE IF NOT EXISTS passes (
+    wallet TEXT PRIMARY KEY, sig TEXT NOT NULL, paid_at REAL NOT NULL
+);
 """
 
 
@@ -519,4 +529,57 @@ class Db:
             ("wallet_funder", funder_ttl_s),
         ]:
             await self._conn.execute(f"DELETE FROM {table} WHERE created_at < ?", (now - ttl,))
+        await self._conn.commit()
+
+    # --- ADR-047 PRO pass payments (non-custodial; see web/payments.py for the verification math) ---
+    async def create_pay_intent(self, intent_id: str, reference: str) -> None:
+        await self._conn.execute(
+            "INSERT INTO pay_intents (intent_id, reference, status, created_at) VALUES (?,?,'pending',?)",
+            (intent_id, reference, time.time()),
+        )
+        await self._conn.commit()
+
+    async def get_pay_intent(self, intent_id: str, ttl_s: float) -> dict | None:
+        """Pending intents expire after ttl_s; PAID intents never expire (they're the receipt)."""
+        cur = await self._conn.execute(
+            "SELECT intent_id, reference, status, wallet, sig, created_at FROM pay_intents WHERE intent_id=?",
+            (intent_id,),
+        )
+        row = await cur.fetchone()
+        if not row:
+            return None
+        d = dict(zip(["intent_id", "reference", "status", "wallet", "sig", "created_at"], row))
+        if d["status"] == "pending" and d["created_at"] < time.time() - ttl_s:
+            return None
+        return d
+
+    async def pay_sig_used(self, sig: str) -> bool:
+        cur = await self._conn.execute("SELECT 1 FROM pay_intents WHERE sig=?", (sig,))
+        return await cur.fetchone() is not None
+
+    async def mark_intent_paid(self, intent_id: str, wallet: str, sig: str, lamports: int) -> None:
+        await self._conn.execute(
+            "UPDATE pay_intents SET status='paid', wallet=?, sig=?, lamports=?, paid_at=? WHERE intent_id=?",
+            (wallet, sig, lamports, time.time(), intent_id),
+        )
+        await self._conn.commit()
+
+    async def grant_pass(self, wallet: str, sig: str) -> None:
+        # INSERT OR IGNORE: paying twice from the same wallet must never downgrade/replace the original
+        # grant — the first receipt stands. (The UI hides the buy button once a pass is active anyway.)
+        await self._conn.execute(
+            "INSERT OR IGNORE INTO passes (wallet, sig, paid_at) VALUES (?,?,?)",
+            (wallet, sig, time.time()),
+        )
+        await self._conn.commit()
+
+    async def has_pass(self, wallet: str) -> bool:
+        cur = await self._conn.execute("SELECT 1 FROM passes WHERE wallet=?", (wallet,))
+        return await cur.fetchone() is not None
+
+    async def prune_pay_intents(self, ttl_s: float) -> None:
+        """Drop stale UNPAID intents only — paid rows are the permanent revenue ledger."""
+        await self._conn.execute(
+            "DELETE FROM pay_intents WHERE status='pending' AND created_at < ?", (time.time() - ttl_s,)
+        )
         await self._conn.commit()

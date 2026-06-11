@@ -13,12 +13,13 @@ on-chain + external checks and returns a forensic safety report in seconds:
   forged account-creation dates via snowflake IDs, posting-cadence bot tells), website domain age
 - **3-source consensus**: RugCheck.xyz + GoPlus + Jupiter (organicScore, audit, verified list)
 - **honeypot sell-simulation** (Jupiter round-trip quote)
-- an **AI analyst** paragraph that cites the actual findings (Groq/Ollama; prompt-injection-hardened;
-  the verdict itself is always the deterministic rule engine — never the LLM)
+- a **deterministic verdict** — every point of the 0–100 score is traceable to a named, documented
+  check (no LLM anywhere in the product path; ADR-048)
 
-Two interchangeable frontends ship A/B: **A "forensic crypto lab"** (dark neon terminal) and
-**B "the case file"** (paper dossier with rubber stamps). Visitors are split 50/50; `GET /api/ab`
-reports which design drives more scans.
+The frontend is **"the case file"** — a paper dossier with rubber stamps (ADR-047). The earlier
+dark-neon "crypto lab" skin remains reachable at `?v=a`. Free tier: **1 fresh scan per day**
+(cached reports unlimited); a one-time, non-custodial **PRO pass** (0.1 SOL straight to the owner's
+wallet) unlocks unlimited scans — default OFF until launch (ADR-047/048).
 
 > ⚠️ **Honesty over hype.** ~98% of fresh meme tokens go to zero. This is a *defensive screener* —
 > it catches the patterns above, but no screen catches every scam. DYOR. Not financial advice.
@@ -69,9 +70,9 @@ make up / make stats / make down  # dormant paper-trading loops, if you ever wan
 |------|------|
 | `src/solscout/web/` | **The product**: FastAPI + OSINT + pure report builder + both frontends |
 | `src/solscout/data/` | One client per external API (retry/throttle/cache; nothing else hits the network) |
-| `docs/DECISIONS.md` | ADR-001…046 — every design decision and *why* |
+| `docs/DECISIONS.md` | ADR-001…048 — every design decision and *why* |
 | `docs/DATA_SOURCES.md` | Every dependency: cost, auth, fallback |
-| `tests/` | 255 passing — the pure layers (filters/scoring/report/osint) are required to be tested |
+| `tests/` | 274 passing — the pure layers (filters/scoring/report/osint/payments) are required to be tested |
 
 ## Tests
 

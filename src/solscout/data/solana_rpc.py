@@ -31,6 +31,20 @@ class SolanaRpcClient(BaseClient):
             raise RuntimeError(f"RPC {method} error: {data['error']}")
         return data.get("result")
 
+    async def get_transaction(self, signature: str, commitment: str = "confirmed") -> dict | None:
+        """Raw getTransaction (jsonParsed) — used by the ADR-047 payment verifier. None = not (yet)
+        on chain at this commitment; the caller treats that as 'pending', not as failure."""
+        return await self._rpc(
+            "getTransaction",
+            [signature, {"encoding": "jsonParsed", "commitment": commitment,
+                         "maxSupportedTransactionVersion": 0}],
+        )
+
+    async def latest_blockhash(self, commitment: str = "confirmed") -> str | None:
+        """Recent blockhash for client-built transactions (proxied so the browser never needs RPC CORS)."""
+        res = await self._rpc("getLatestBlockhash", [{"commitment": commitment}])
+        return ((res or {}).get("value") or {}).get("blockhash")
+
     async def get_mint_info(self, mint: str) -> MintInfo | None:
         """Authorities + supply + decimals. None if not a valid SPL mint.
         Holder concentration is computed separately from Helius DAS (see data/helius.py)."""

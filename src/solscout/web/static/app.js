@@ -21,7 +21,7 @@ const LEVEL = LEVEL_AB[window.__V === "b" ? "b" : "a"];
 const STATUS_ICON = { pass: "✓", warn: "!", fail: "✕", skip: "–", info: "i" };
 const CATEGORY_ORDER = ["Authorities", "Liquidity", "Holders", "Activity", "Manipulation",
   "Bundle & Insiders", "Creator / deployer", "Buyers (wallet history)",
-  "External (RugCheck)", "External (GoPlus)", "External (Jupiter)", "Honeypot", "Social & AI"];
+  "External (RugCheck)", "External (GoPlus)", "External (Jupiter)", "Honeypot", "Social & Web"];
 
 /* ---------- helpers ---------- */
 const usd = (v) => {
@@ -80,13 +80,20 @@ async function run(mint) {
   $("#report").hidden = true;
   showScanning();
   try {
-    const fetchP = fetch(`/api/check/${mint}?variant=${window.__V || "a"}`);  // variant rides the same call (A/B count)
-    await runScanLog(fetchP);                        // step the log, holding on AI synthesis until it lands
+    // variant rides the same call (A/B count); a PRO pass rides as X-Pass (no extra request either)
+    const fetchP = fetch(`/api/check/${mint}?variant=${window.__V || "a"}`, _passHeaders());
+    await runScanLog(fetchP);                        // step the log, parking on the slow wallet-trace stage
     const res = await fetchP;
     const data = await res.json();
     $("#scanning").hidden = true;
     if (!res.ok || data.error) {
       $("#hero").hidden = false;
+      // ADR-048 trial: the daily free scan is spent → no warning text anywhere, the PRO sheet IS the answer
+      if (res.status === 429 && data.scope === "daily_mints" && PAY_INFO) {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        openPay(true);
+        return;
+      }
       let msg = data.detail || "Could not analyze this token right now. Try again.";
       if (res.status === 429 && data.retry_after_s && data.scope === "burst") {
         msg = `Rate limit — wait ~${data.retry_after_s}s and try again.`;
@@ -106,13 +113,20 @@ async function run(mint) {
 }
 
 /* ---------- scanning state ---------- */
-// Honest about the real pipeline, ordered cheap→slow. The last step (deep wallet + AI work) is where the
+// Honest about the real pipeline, ordered cheap→slow. The last step (the deep wallet trace) is where the
 // real time goes, so the log PARKS there in a "working" state until the request actually returns — instead
 // of flashing every step "OK" in a second and then making the user stare at a frozen all-OK list.
-const SCAN_STEPS = ["resolving mint & metadata", "reading on-chain authorities (mint / freeze)",
-  "pulling DEX market + liquidity", "mapping holder distribution", "cross-checking RugCheck + GoPlus",
-  "scanning wash-trading & insider bundles", "tracing deployer + buyer wallets",
-  "AI forensic synthesis over the full report"];
+// Two voices, same honest pipeline: A speaks lab, B speaks case file (ADR-047) — step N maps to the
+// same real work in both, so the log never lies about what's happening.
+const SCAN_STEPS_AB = {
+  a: ["resolving mint & metadata", "reading on-chain authorities (mint / freeze)",
+    "pulling DEX market + liquidity", "mapping holder distribution", "cross-checking RugCheck + GoPlus",
+    "scanning wash-trading & insider bundles", "tracing deployer + buyer wallets"],
+  b: ["opening case file", "subpoenaing on-chain authorities (mint / freeze)",
+    "examining the liquidity exhibit", "mapping the holder lineup", "cross-examining RugCheck + GoPlus + Jupiter",
+    "dusting for wash-trading & insider prints", "interviewing deployer + buyer wallets"],
+};
+const SCAN_STEPS = SCAN_STEPS_AB[window.__V === "b" ? "b" : "a"];
 function showScanning() {
   $("#hero").hidden = true;     // swap the big hero for the focused scan → report flow
   $("#report").hidden = true;
@@ -182,9 +196,6 @@ function render(d) {
   // gauge
   setGauge(d.score);
 
-  // the watcher reacts to the verdict — glares at rugs, eases up on clean coins
-  setWatcher($("#watcherReaction"), LEVEL_MOOD[d.level] || "safe");
-
   // checks
   $("#checkMeta").textContent = `${c.total} checks · ${d.meta.took_ms ?? "?"}ms${d.cached ? " · cached" : ""}`;
   renderChecks(d.checks);
@@ -196,7 +207,6 @@ function render(d) {
   renderMarket(d.market, d.flow, d.overview);
   renderInsiderNetworks(d.insider_networks);
   renderSources(d.sources, d.honeypot);
-  renderAI(d.ai);
 
   // re-trigger reveal animations
   $$(".reveal", rep).forEach((el, i) => { el.style.animation = "none"; void el.offsetWidth; el.style.animation = ""; el.style.animationDelay = (i * 0.05) + "s"; });
@@ -333,60 +343,6 @@ function _twTimeline(tw) {
 
 function _compact(v) { if (v == null) return "—"; if (v < 1000) return "" + v; if (v < 1e6) return (v / 1e3).toFixed(1) + "K"; return (v / 1e6).toFixed(1) + "M"; }
 
-/* ---------- the watcher (reactive meme face) ---------- */
-// Three faces, keyed to how bad the verdict is:
-//   rugged → "surprise, motherf*****" (caught red-handed)  · CRITICAL
-//   risky  → the cold "I'm watching you" stare             · DANGER / CAUTION
-//   safe   → eased-up / approving                          · SAFE  (placeholder until a clean face is set)
-// Real media first; an SVG silhouette is the fallback if a file is ever missing (404 → onerror swaps it in).
-// currentColor inherits the theme --verdict tint.
-const LEVEL_MOOD = { CRITICAL: "rugged", DANGER: "risky", CAUTION: "risky", SAFE: "safe" };
-// per-face media + how long to keep it on screen before it gently fades out (≈2–3 plays of that clip, then a
-// soft CSS opacity fade — not an abrupt cut). `safe` has no file yet (the user is supplying the clean "okay"
-// face) → it renders the calm line-art silhouette below and just stays. Add safe here with a file to use it.
-// MP4 video, not GIF — full colour, no 256-colour banding, sharper, smaller. Autoplay-muted-loop renders
-// like a gif but at much higher quality. holdMs ≈ 2–3 plays of that clip before the soft fade.
-const _FACE = {
-  rugged: { file: "rugged.mp4", holdMs: 12700 },  // 6.33s clip × ~2 plays
-  risky:  { file: "risky.mp4",  holdMs: 8200 },   // 2.73s clip × ~3 plays
-};
-const _WATCHER_FADE_MS = 1500;  // must match .watcher-corner transition in styles.css
-const HEAD = "M22 28 Q22 13 40 13 L60 13 Q78 13 78 28 L78 55 Q78 85 50 92 Q22 85 22 55 Z";
-const _FALLBACK_SVG = (mood) =>
-  `<svg class="watcher-svg ${mood}" viewBox="0 0 100 100" fill="none" stroke="currentColor" ` +
-  `stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">` +
-  `<path class="head" d="${HEAD}" stroke-width="2.4" opacity=".55"/>` +
-  (mood === "glare"
-    ? `<path d="M20 35 L44 43"/><path d="M80 35 L56 43"/><path d="M27 52 L41 52" stroke-width="5"/><path d="M59 52 L73 52" stroke-width="5"/><path d="M33 74 Q50 64 67 74"/>`
-    : `<path d="M22 36 L44 36"/><path d="M56 36 L78 36"/><circle cx="35" cy="50" r="2.8" fill="currentColor" stroke="none"/><circle cx="65" cy="50" r="2.8" fill="currentColor" stroke="none"/><path d="M34 72 L66 72"/>`) +
-  `</svg>`;
-function watcherFace(mood) {
-  const hostile = (mood === "rugged" || mood === "risky");  // both glare; safe is calm
-  const f = _FACE[mood];
-  // no media for this mood (e.g. safe until a clean face is supplied) → render the calm silhouette directly,
-  // so there's no broken/404 request. A real file, when present, falls back to the same SVG on load error.
-  if (!f) return _FALLBACK_SVG(hostile ? "glare" : "watch");
-  const svg = _FALLBACK_SVG(hostile ? "glare" : "watch").replace(/"/g, "&quot;");
-  return `<video class="watcher-gif ${mood}" autoplay loop muted playsinline ` +
-    `src="/static/watcher/${f.file}" onerror="this.outerHTML='${svg}'"></video>`;
-}
-// generation token so a fresh scan cancels a pending fade/clear from the previous one
-let _watcherGen = 0;
-function setWatcher(el, mood) {
-  if (!el) return;
-  const gen = ++_watcherGen;
-  el.classList.remove("faded");          // re-show (a new scan revives the corner)
-  el.innerHTML = watcherFace(mood);
-  const f = _FACE[mood];
-  if (!f) return;                        // safe line-art: no auto-fade, it just sits there calmly
-  // after ~2–3 plays, gently fade out; once invisible, drop the gif so it stops looping (spares CPU)
-  setTimeout(() => {
-    if (gen !== _watcherGen) return;     // a newer scan already took over
-    el.classList.add("faded");
-    setTimeout(() => { if (gen === _watcherGen) el.innerHTML = ""; }, _WATCHER_FADE_MS + 80);
-  }, f.holdMs);
-}
-
 function renderMarket(m, flow, overview) {
   if (!m || !Object.keys(m).length) { $("#metrics").innerHTML = `<span class="muted-note">No DEX market found.</span>`; $("#flow").innerHTML = ""; return; }
   const chg = m.price_change_h24;
@@ -470,11 +426,152 @@ function renderSources(sources, hp) {
   el.innerHTML = html;
 }
 
-function renderAI(ai) {
-  const el = $("#aiBody");
-  if (!ai || !ai.summary) { el.innerHTML = `<span class="muted-note">AI analyst unavailable (local model offline).</span>`; return; }
-  const via = ai.model ? `via ${esc(ai.model)}` : (ai.provider === "rules" ? "rule-based (model offline)" : "");
-  el.innerHTML =
-    `<div class="note">${esc(ai.summary)}</div>` +
-    `<div class="muted-note" style="margin-top:12px">Reasons over the full forensic report ${via ? "· " + via : ""}. One signal — never the verdict. Not financial advice.</div>`;
+
+/* ---------- PRO pass (ADR-047): one-time payment → unlimited scans. NON-CUSTODIAL ----------
+   The buyer's own wallet signs ONE SystemProgram transfer straight to the site's payout address,
+   tagged with a server-issued reference pubkey; the backend verifies it on-chain and mints an
+   HMAC pass token. No keys, no funds, no accounts ever touch this code. */
+const PASS_KEY = "rc_pass";
+function getPass() { try { return JSON.parse(localStorage.getItem(PASS_KEY) || "null"); } catch { return null; } }
+function setPass(p) { try { localStorage.setItem(PASS_KEY, JSON.stringify(p)); } catch { /* private mode */ } }
+function _passHeaders() { const p = getPass(); return p && p.wallet && p.token ? { headers: { "X-Pass": p.wallet + "." + p.token } } : {}; }
+
+let PAY_INFO = null;
+(async () => {  // probe once: the PRO button exists only when the server actually sells passes
+  try {
+    const s = await (await fetch("/api/pay/status")).json();
+    if (!s.enabled) return;
+    PAY_INFO = s;
+    const btn = $("#proBtn");
+    btn.hidden = false;
+    _syncProBtn();
+    btn.addEventListener("click", openPay);
+    $("#payClose").addEventListener("click", closePay);
+    $("#payModal").addEventListener("click", (e) => { if (e.target.id === "payModal") closePay(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePay(); });
+    $("#payGo").addEventListener("click", buyFlow);
+    $("#payRestore").addEventListener("click", restoreFlow);
+  } catch { /* payments off / offline */ }
+})();
+
+function _syncProBtn() {
+  const btn = $("#proBtn"), p = getPass();
+  if (!btn || !PAY_INFO) return;
+  btn.textContent = p ? "★ PRO ✓" : `★ PRO · ${PAY_INFO.price_sol} SOL`;
+  btn.title = p ? `PRO active on ${short(p.wallet)} — unlimited scans` : "One-time payment → unlimited scans, forever";
+  btn.classList.toggle("active", !!p);
+}
+function openPay(fromLimit) {
+  // fromLimit === true ONLY from the daily-limit path (as a click handler the arg is an Event object)
+  $("#payTitle").textContent = fromLimit === true ? "Today's free scan is used" : "PRO pass";
+  $("#payPrice").textContent = `${PAY_INFO.price_sol} SOL`;
+  $("#payErr").hidden = true;
+  const p = getPass();
+  $("#payOk").hidden = !p;
+  $("#payGo").style.display = p ? "none" : "";
+  $("#payRestore").style.display = p ? "none" : "";
+  _payStep("");
+  $("#payModal").hidden = false;
+}
+function closePay() { $("#payModal").hidden = true; }
+function _payStep(t) { $("#payStep").textContent = t; }
+function _paySuccess() { _payStep(""); $("#payOk").hidden = false; $("#payGo").style.display = "none"; $("#payRestore").style.display = "none"; }
+
+function walletProvider() {
+  return (window.phantom && window.phantom.solana) || window.solana || window.solflare ||
+         (window.backpack && window.backpack.solana) || null;
+}
+// web3.js loads on demand (only when someone actually clicks pay) and version-PINNED — never @latest.
+// At deploy you can self-host this one file under /static/vendor/ and swap the src for zero third-party JS.
+let _w3p = null;
+function loadWeb3() {
+  if (window.solanaWeb3) return Promise.resolve(window.solanaWeb3);
+  if (_w3p) return _w3p;
+  _w3p = new Promise((res, rej) => {
+    const s = document.createElement("script");
+    s.src = "https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js";
+    s.onload = () => (window.solanaWeb3 ? res(window.solanaWeb3) : rej(new Error("wallet library failed to load")));
+    s.onerror = () => rej(new Error("wallet library failed to load"));
+    document.head.appendChild(s);
+  });
+  return _w3p;
+}
+async function _pj(url, opts) {  // fetch JSON; "pending" 200s pass through, hard errors throw with detail
+  const res = await fetch(url, opts);
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok && !j.pending) throw new Error(j.detail || ("HTTP " + res.status));
+  return j;
+}
+
+async function buyFlow() {
+  const err = $("#payErr");
+  err.hidden = true;
+  const prov = walletProvider();
+  if (!prov) {
+    err.textContent = "No Solana wallet found — install Phantom/Solflare, or open this page inside your wallet app's browser.";
+    err.hidden = false;
+    return;
+  }
+  try {
+    _payStep("connecting wallet…");
+    const w3 = await loadWeb3();
+    const conn = await prov.connect();
+    const payer = new w3.PublicKey(((conn && conn.publicKey) || prov.publicKey).toString());
+    _payStep("preparing payment…");
+    const intent = await _pj("/api/pay/intent", { method: "POST" });
+    const bh = await _pj("/api/pay/blockhash");
+    const tx = new w3.Transaction({ feePayer: payer, recentBlockhash: bh.blockhash });
+    const ix = w3.SystemProgram.transfer({
+      fromPubkey: payer, toPubkey: new w3.PublicKey(intent.payout), lamports: intent.lamports,
+    });
+    // the server-issued reference rides as a read-only key — it's how the backend finds & binds THIS payment
+    ix.keys.push({ pubkey: new w3.PublicKey(intent.reference), isSigner: false, isWritable: false });
+    tx.add(ix);
+    _payStep("waiting for your signature…");
+    const sent = await prov.signAndSendTransaction(tx);
+    const sig = String((sent && sent.signature) || sent);
+    _payStep("confirming on-chain… (a few seconds)");
+    const deadline = Date.now() + ((PAY_INFO.confirm_wait_s || 90) * 1000);
+    while (Date.now() < deadline) {
+      const r = await _pj("/api/pay/confirm", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ intent_id: intent.intent_id, sig }),
+      });
+      if (r.ok) { setPass({ wallet: r.wallet, token: r.token }); _syncProBtn(); _paySuccess(); return; }
+      if (!r.pending) throw new Error(r.detail || "Payment rejected.");
+      await sleep(5000);
+    }
+    throw new Error("Confirmation timed out — if the transfer DID go through, use “restore with wallet” in a minute.");
+  } catch (e) {
+    err.textContent = (e && e.message) || "Payment failed.";
+    err.hidden = false;
+    _payStep("");
+  }
+}
+
+async function restoreFlow() {  // new device / cleared storage: prove ownership via signMessage
+  const err = $("#payErr");
+  err.hidden = true;
+  const prov = walletProvider();
+  if (!prov) { err.textContent = "No Solana wallet found."; err.hidden = false; return; }
+  try {
+    _payStep("proving wallet ownership…");
+    await prov.connect();
+    const wallet = prov.publicKey.toString();
+    const ts = Math.floor(Date.now() / 1000);
+    const signed = await prov.signMessage(new TextEncoder().encode(`rugcheck-pass:${wallet}:${ts}`), "utf8");
+    const bytes = new Uint8Array((signed && signed.signature) || signed);
+    const sig_hex = [...bytes].map((b) => b.toString(16).padStart(2, "0")).join("");
+    const r = await _pj("/api/pay/restore", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ wallet, ts, sig_hex }),
+    });
+    setPass({ wallet: r.wallet, token: r.token });
+    _syncProBtn();
+    _paySuccess();
+  } catch (e) {
+    err.textContent = (e && e.message) || "Restore failed — no pass found on that wallet?";
+    err.hidden = false;
+    _payStep("");
+  }
 }

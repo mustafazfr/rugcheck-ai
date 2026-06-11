@@ -18,10 +18,11 @@ from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from solders.pubkey import Pubkey
 
 from .. import pipeline
 from ..core.config import load
-from ..llm import analyst
 from ..core.credits import CompositeGovernor, CreditGovernor, DailyCap, day_key, month_key
 from ..core.db import Db
 from ..core.logging import get_logger
@@ -37,6 +38,7 @@ from ..data.telegram_web import TelegramWebClient
 from ..data.tweetscout import TweetScoutClient
 from ..data.twitter_public import TwitterPublicClient
 from . import osint as osint_mod
+from . import payments as pay_mod
 from .ratelimit import DailyMintLedger, IpLimiter
 from .report import build_report
 
@@ -88,6 +90,25 @@ async def lifespan(app: FastAPI):
             if rate.enabled else None
         )
         app.state.mint_ledger = DailyMintLedger(rate.daily_unique_mints_per_ip) if rate.enabled else None
+        # ADR-047 PRO pass — validated HERE so a misconfigured deploy degrades to "payments off",
+        # never to 500s mid-flight. NON-CUSTODIAL: `payout` is a public address; the only secret is
+        # the HMAC token key, and it lives in .env (Golden Rule #3).
+        payc = cfg.payments
+        payout = (secrets.payout_wallet or payc.payout_wallet).strip()
+        app.state.pass_secret = secrets.pass_secret
+        app.state.pay_enabled = bool(payc.enabled and payout and secrets.pass_secret)
+        if payc.enabled and not app.state.pay_enabled:
+            log.error("payments.enabled=true but PAYOUT_WALLET / PASS_SECRET missing — payments stay OFF")
+        if app.state.pay_enabled:
+            try:
+                Pubkey.from_string(payout)
+            except ValueError:
+                log.error("PAYOUT_WALLET %r is not a valid Solana pubkey — payments stay OFF", payout[:12])
+                app.state.pay_enabled = False
+        app.state.payout = payout
+        # PRO burst bucket is keyed by WALLET (fairer than IP — pass holders may share cafés, not passes)
+        app.state.pro_limiter = IpLimiter(payc.pass_burst, rate.per_ip_refill_per_s, rate.max_tracked_ips)
+        await db.prune_pay_intents(payc.intent_ttl_s)
         mk = month_key()
         # governor = monthly pace AND a daily web sub-budget — both persisted in credit_usage
         # (month TEXT PK takes arbitrary keys, so `web:YYYY-MM-DD` rows need no migration).
@@ -105,6 +126,8 @@ async def lifespan(app: FastAPI):
             DexScreenerClient() as dex,
             GeckoTerminalClient(network=cfg.geckoterminal.network) as gecko,
             SolanaRpcClient(endpoint=cfg.solana_rpc_url or None) as rpc,
+            # payment verification can point elsewhere (devnet dry-run) without touching the main RPC
+            SolanaRpcClient(endpoint=cfg.payments.rpc_url or cfg.solana_rpc_url or None) as pay_rpc,
             HeliusClient(
                 secrets.helius_api_key,
                 cache_ttl_s=cfg.helius.cache_ttl_s,
@@ -122,12 +145,11 @@ async def lifespan(app: FastAPI):
             TelegramWebClient() as tg,
             TweetScoutClient(secrets.tweetscout_api_key) as ts,
         ):
-            app.state.clients = dict(dex=dex, gecko=gecko, rpc=rpc, helius=helius, jup=jup,
-                                     rc=rc, gp=gp, twp=twp, rdap=rdap, tg=tg, ts=ts)
+            app.state.clients = dict(dex=dex, gecko=gecko, rpc=rpc, pay_rpc=pay_rpc, helius=helius,
+                                     jup=jup, rc=rc, gp=gp, twp=twp, rdap=rdap, tg=tg, ts=ts)
             app.state.helius_on = bool(secrets.helius_api_key)
-            app.state.groq_key = secrets.groq_api_key  # optional; analyst uses it when set, else local Ollama
-            log.info("rugcheck.ai up — helius=%s · analyst=%s", app.state.helius_on,
-                     "groq" if app.state.groq_key else "ollama")
+            log.info("rugcheck.ai up — helius=%s · payments=%s", app.state.helius_on,
+                     "on" if app.state.pay_enabled else "off")
             yield
 
 
@@ -141,6 +163,17 @@ def _client_ip(request: Request) -> str:
         if xff:
             return xff.split(",")[0].strip()
     return request.client.host if request.client else "?"
+
+
+def _pro_wallet(request: Request) -> str | None:
+    """Wallet behind a valid `X-Pass: <wallet>.<token>` header, else None. Pure HMAC check — no db
+    hit per request; a token only ever exists because /api/pay/confirm or /restore minted it."""
+    secret = getattr(app.state, "pass_secret", "")
+    parsed = pay_mod.parse_pass_header(request.headers.get("x-pass"))
+    if not secret or parsed is None:
+        return None
+    wallet, token = parsed
+    return wallet if pay_mod.check_pass_token(secret, wallet, token) else None
 
 
 def _429(scope: str, detail: str, retry_after_s: int) -> JSONResponse:
@@ -158,10 +191,43 @@ async def _rate_limit(request: Request, call_next):
     path = request.url.path
     if limiter is None or not path.startswith("/api/") or path == "/api/health":
         return await call_next(request)
-    ok, retry = limiter.allow(_client_ip(request))
+    # PRO pass (ADR-047): a valid X-Pass rides its own, larger bucket keyed by wallet instead of IP
+    pro = _pro_wallet(request)
+    if pro is not None:
+        ok, retry = app.state.pro_limiter.allow("w:" + pro)
+    else:
+        ok, retry = limiter.allow(_client_ip(request))
     if not ok:
         return _429("burst", f"Too many requests — slow down and retry in ~{retry}s.", retry)
     return await call_next(request)
+
+
+@app.middleware("http")
+async def _security_headers(request: Request, call_next):
+    """ADR-048 hardening. CSP works because nothing is inline anymore (boot.js is external):
+    scripts only from us + the pinned unpkg web3.js; styles from us + Google Fonts (inline style
+    ATTRIBUTES are part of how app.js renders, hence 'unsafe-inline' on style-src only); images
+    https: (Twitter avatars). HSTS only makes sense once we're actually behind TLS → trust_proxy."""
+    resp = await call_next(request)
+    cfg = getattr(app.state, "cfg", None)
+    if cfg is None or not cfg.web.security_headers:
+        return resp
+    h = resp.headers
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
+    h.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; script-src 'self' https://unpkg.com; "
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+        "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; "
+        "connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "base-uri 'self'; form-action 'self'",
+    )
+    if cfg.web.rate.trust_proxy:  # behind Caddy/Cloudflare = TLS is on → pin it
+        h.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return resp
 
 
 @app.get("/api/health")
@@ -175,7 +241,6 @@ async def health():
             "rugcheck": True,
             "jupiter": True,
             "helius": on,
-            "ollama_ai": True,  # best-effort; degrades if Ollama is down
         },
     }
 
@@ -196,11 +261,9 @@ async def _run_analysis(mint: str) -> dict:
     osint = await osint_mod.gather(
         a, cfg, rc=c["rc"], gp=c["gp"], helius=c["helius"], tw=c["twp"], db=db, jup=c["jup"], rdap=c["rdap"]
     ) or {}
-    report = build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
-    # AI analyst (ADR-042): a verdict that reasons over the WHOLE report — runs AFTER everything is
-    # assembled so the model cites the actual findings, not just name+market. Free + local; best-effort.
-    report["ai"] = await analyst.analyze_report(report, cfg.llm, groq_key=app.state.groq_key)
-    return report
+    # ADR-048: no LLM in the product path anymore — the verdict is (and always was) the
+    # deterministic engine; dropping the analyst removes the slowest step + the injection surface.
+    return build_report(a, cfg, osint=osint, took_ms=round((time.monotonic() - t0) * 1000))
 
 
 async def _ab_bump(variant: str | None, event: str) -> None:
@@ -223,14 +286,18 @@ async def check(mint: str, request: Request, refresh: bool = False, variant: str
     db: Db = app.state.db
     cache = app.state.cache
     now = time.monotonic()
+    # PRO pass (ADR-047): paid wallets skip the daily fresh-mint ledger and get a snappier refresh
+    # guard — but Helius budgets still apply (the governor protects the free tier, pass or not).
+    pro = _pro_wallet(request) is not None
+    guard = app.state.cfg.payments.pro_refresh_guard_s if pro else web.min_refresh_interval_s
     hit = cache.get(mint)
-    # L1 in-process. refresh=1 is honored only past `min_refresh_interval_s` — a cache-busting loop can't
+    # L1 in-process. refresh=1 is honored only past the guard — a cache-busting loop can't
     # force a Helius re-spend every second (ADR-046).
-    if hit and (now - hit[0]) < (web.min_refresh_interval_s if refresh else web.report_ttl_s):
+    if hit and (now - hit[0]) < (guard if refresh else web.report_ttl_s):
         await _ab_bump(variant, "check_cached")
         return {**hit[1], "cached": True}
     # L2 persistent (survives restarts/extra workers). Same refresh guard via a shorter TTL.
-    l2 = await db.cache_get_report(mint, web.min_refresh_interval_s if refresh else web.report_db_ttl_s)
+    l2 = await db.cache_get_report(mint, guard if refresh else web.report_db_ttl_s)
     if l2 is not None:
         cache[mint] = (now, l2)
         await _ab_bump(variant, "check_cached")
@@ -251,7 +318,7 @@ async def check(mint: str, request: Request, refresh: bool = False, variant: str
     # this is genuinely NEW work → charge it to the caller's daily fresh-mint allowance (ADR-046).
     # Cached/in-flight lookups above never reach this point, so normal browsing is unaffected.
     ledger = getattr(app.state, "mint_ledger", None)
-    if ledger is not None and not ledger.allow(_client_ip(request), mint, day_key()):
+    if ledger is not None and not pro and not ledger.allow(_client_ip(request), mint, day_key()):
         return _429(
             "daily_mints",
             "Daily fresh-scan limit reached for your IP — already-scanned tokens still work. Resets at 00:00 UTC.",
@@ -290,6 +357,116 @@ async def ab_stats(days: int = 14):
     except Exception:
         stats = {}
     return {"since": since, "variants": stats}
+
+
+# — ADR-047 PRO pass payments (non-custodial; pure verification in web/payments.py) —
+_B58SIG = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{64,90}$")  # a 64-byte tx signature in base58
+
+
+def _pay_off() -> JSONResponse:
+    return JSONResponse({"error": "payments_disabled", "detail": "Payments are not enabled."}, status_code=404)
+
+
+@app.get("/api/pay/status")
+async def pay_status():
+    """Frontend probe: is the PRO pass purchasable here, and at what price?"""
+    if not getattr(app.state, "pay_enabled", False):
+        return {"enabled": False}
+    payc = app.state.cfg.payments
+    return {"enabled": True, "price_sol": payc.price_sol, "payout": app.state.payout,
+            "confirm_wait_s": payc.confirm_wait_s}
+
+
+@app.post("/api/pay/intent")
+async def pay_intent():
+    """Mint a payment intent: a fresh reference pubkey the buyer's transfer must carry. The matching
+    private key is discarded inside `new_intent` — it never signs anything, it's a tracking tag."""
+    if not getattr(app.state, "pay_enabled", False):
+        return _pay_off()
+    payc = app.state.cfg.payments
+    intent_id, reference = pay_mod.new_intent()
+    await app.state.db.create_pay_intent(intent_id, reference)
+    return {"intent_id": intent_id, "reference": reference, "payout": app.state.payout,
+            "price_sol": payc.price_sol, "lamports": pay_mod.lamports(payc.price_sol)}
+
+
+@app.get("/api/pay/blockhash")
+async def pay_blockhash():
+    """Recent blockhash for the client-built transfer — proxied so the browser never talks RPC."""
+    if not getattr(app.state, "pay_enabled", False):
+        return _pay_off()
+    try:
+        bh = await app.state.clients["pay_rpc"].latest_blockhash(app.state.cfg.payments.commitment)
+    except Exception:
+        bh = None
+    if not bh:
+        return JSONResponse({"error": "rpc_unavailable", "detail": "Could not fetch a blockhash."}, status_code=502)
+    return {"blockhash": bh}
+
+
+class _ConfirmBody(BaseModel):
+    intent_id: str
+    sig: str
+
+
+@app.post("/api/pay/confirm")
+async def pay_confirm(body: _ConfirmBody):
+    """Verify the broadcast transaction on-chain and grant the pass. Client polls this (~5s) while
+    the tx confirms: {"pending": true} = keep waiting; 4xx = definitive no; ok = token issued."""
+    if not getattr(app.state, "pay_enabled", False):
+        return _pay_off()
+    payc = app.state.cfg.payments
+    db: Db = app.state.db
+    if not _B58SIG.match(body.sig.strip()):
+        return JSONResponse({"error": "bad_signature", "detail": "Not a valid transaction signature."}, status_code=400)
+    sig = body.sig.strip()
+    intent = await db.get_pay_intent(body.intent_id, payc.intent_ttl_s)
+    if intent is None:
+        return JSONResponse({"error": "unknown_intent", "detail": "Intent expired or unknown — start over."}, status_code=404)
+    if intent["status"] == "paid":  # idempotent: re-confirming a paid intent re-issues the same token
+        token = pay_mod.mint_pass_token(app.state.pass_secret, intent["wallet"])
+        return {"ok": True, "wallet": intent["wallet"], "token": token}
+    if await db.pay_sig_used(sig):
+        return JSONResponse({"error": "sig_reused", "detail": "That transaction already redeemed a pass."}, status_code=409)
+    try:
+        tx = await app.state.clients["pay_rpc"].get_transaction(sig, payc.commitment)
+    except Exception:
+        return JSONResponse({"error": "rpc_unavailable", "detail": "Chain lookup failed — retry shortly."}, status_code=502)
+    ok, reason, info = pay_mod.validate_payment_tx(
+        tx, reference=intent["reference"], payout=app.state.payout,
+        min_lamports=pay_mod.lamports(payc.price_sol),
+    )
+    if reason == "not_found":  # not on chain (yet) at this commitment — the client keeps polling
+        return {"ok": False, "pending": True}
+    if not ok:
+        log.info("pay_confirm rejected intent=%s reason=%s", body.intent_id[:8], reason)
+        return JSONResponse({"error": "payment_invalid", "reason": reason,
+                             "detail": "Transaction doesn't match this payment."}, status_code=402)
+    wallet = info["wallet"]
+    await db.mark_intent_paid(body.intent_id, wallet, sig, info["lamports"])
+    await db.grant_pass(wallet, sig)
+    log.info("PRO pass granted wallet=%s… lamports=%d", wallet[:8], info["lamports"])
+    return {"ok": True, "wallet": wallet, "token": pay_mod.mint_pass_token(app.state.pass_secret, wallet)}
+
+
+class _RestoreBody(BaseModel):
+    wallet: str
+    ts: int
+    sig_hex: str
+
+
+@app.post("/api/pay/restore")
+async def pay_restore(body: _RestoreBody):
+    """Recover a pass on a new device: prove wallet ownership with signMessage, get the token back."""
+    if not getattr(app.state, "pay_enabled", False):
+        return _pay_off()
+    if abs(time.time() - body.ts) > pay_mod.RESTORE_MAX_SKEW_S:
+        return JSONResponse({"error": "stale", "detail": "Signature too old — try again."}, status_code=400)
+    if not pay_mod.verify_wallet_signature(body.wallet, pay_mod.restore_message(body.wallet, body.ts), body.sig_hex):
+        return JSONResponse({"error": "bad_proof", "detail": "Wallet signature didn't verify."}, status_code=401)
+    if not await app.state.db.has_pass(body.wallet):
+        return JSONResponse({"error": "no_pass", "detail": "No PRO pass on that wallet."}, status_code=404)
+    return {"ok": True, "wallet": body.wallet, "token": pay_mod.mint_pass_token(app.state.pass_secret, body.wallet)}
 
 
 # — static frontend —

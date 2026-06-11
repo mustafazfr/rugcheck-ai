@@ -259,13 +259,29 @@ web:
   jupiter_first_deployer: true # use Jupiter devMints (free) before the 10cr Helius deployer call
   helius_daily_budget: 15000   # web's own daily Helius credit cap (inside the monthly governor)
   ab_enabled: true             # serve + measure the two frontend design variants (A lab / B case-file)
+  security_headers: true       # ADR-048: CSP / nosniff / frame-deny / referrer (+HSTS behind a proxy)
   rate:
     enabled: true
     per_ip_burst: 8            # instant burst per IP (token bucket)
     per_ip_refill_per_s: 0.25  # ≈15 sustained requests/min per IP
-    daily_unique_mints_per_ip: 40  # fresh (cache-miss) mints one IP may trigger per UTC day
+    # ADR-048 trial: 1 free FRESH scan per IP per day; the 2nd opens the PRO payment sheet directly.
+    # Cached reports stay unlimited (re-checking a coin is always free). Raise this anytime, here only.
+    daily_unique_mints_per_ip: 1
     max_tracked_ips: 10000
     trust_proxy: false         # true behind a reverse proxy → honor the first X-Forwarded-For hop
+
+# ADR-047 — PRO pass: ONE-TIME price_sol payment → that wallet scans without daily limits, forever.
+# Non-custodial: the buyer signs one transfer DIRECTLY to your payout wallet; we only verify it on-chain.
+# Needs env PAYOUT_WALLET (your public address) + PASS_SECRET set, else it stays off. Free verdict stays free.
+payments:
+  enabled: false               # default OFF (Golden Rule) — flip on per-deploy, never in this repo file
+  price_sol: 0.1               # one-time price; tune to market here
+  rpc_url: ""                  # optional: point at devnet for an end-to-end payment dry-run
+  commitment: confirmed        # finalized = slower but reorg-proof
+  intent_ttl_s: 900
+  confirm_wait_s: 90
+  pass_burst: 30               # PRO burst bucket (keyed by wallet, not IP)
+  pro_refresh_guard_s: 10
 
 storage:
   db_path: "./solscout.db"

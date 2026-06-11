@@ -342,7 +342,9 @@ class RateCfg(BaseModel):
     enabled: bool = True
     per_ip_burst: int = 8  # token-bucket capacity (instant burst per IP)
     per_ip_refill_per_s: float = 0.25  # ≈15 requests/min sustained per IP
-    daily_unique_mints_per_ip: int = 40  # fresh (cache-miss) mints one IP may trigger per UTC day
+    # ADR-048 trial model (the owner's call): 1 free FRESH scan per IP per UTC day; the 2nd one opens
+    # the PRO payment sheet directly. Cached reports stay unlimited — re-checking a coin is always free.
+    daily_unique_mints_per_ip: int = 1
     max_tracked_ips: int = 10_000  # LRU bound on the in-memory IP table
     trust_proxy: bool = False  # True behind a reverse proxy → honor the first X-Forwarded-For hop
 
@@ -359,7 +361,26 @@ class WebCfg(BaseModel):
     jupiter_first_deployer: bool = True  # use Jupiter devMints (free) before the 10cr Helius deployer call
     helius_daily_budget: float = 15_000  # web's own daily Helius credit cap (inside the monthly governor)
     ab_enabled: bool = True  # serve/measure the two frontend design variants
+    security_headers: bool = True  # ADR-048: CSP / nosniff / frame-deny / referrer (+HSTS behind a proxy)
     rate: RateCfg = Field(default_factory=RateCfg)
+
+
+class PaymentsCfg(BaseModel):
+    """ADR-047 — PRO pass: ONE-TIME `price_sol` payment → that wallet scans with no daily limits, forever.
+    NON-CUSTODIAL by design: the buyer signs a single SystemProgram transfer DIRECTLY to `payout_wallet`
+    (with a server-generated reference pubkey attached) and we verify the broadcast tx on-chain. No
+    private key ever exists server-side. The free verdict stays free — this only lifts the abuse limits.
+    Default OFF (Golden Rule: anything touching real money ships behind a default-off flag)."""
+
+    enabled: bool = False  # master flag; also forced off if PASS_SECRET / payout wallet are missing
+    price_sol: float = 0.1  # one-time price — tune to market here, never in code
+    payout_wallet: str = ""  # YOUR receiving address (public key — env PAYOUT_WALLET overrides)
+    rpc_url: str = ""  # optional separate RPC for payment verification (e.g. devnet dry-run); "" = main RPC
+    commitment: str = "confirmed"  # getTransaction commitment; "finalized" = slower but reorg-proof
+    intent_ttl_s: float = 900  # unpaid intents expire after this (pruned at startup)
+    confirm_wait_s: float = 90  # how long the client may keep polling confirm before giving up
+    pass_burst: int = 30  # PRO token-bucket capacity (keyed by wallet, replaces the per-IP burst)
+    pro_refresh_guard_s: float = 10  # PRO can force-refresh, but not more often than this (anti double-click)
 
 
 class RunCfg(BaseModel):
@@ -404,6 +425,7 @@ class Config(BaseModel):
     position: PositionCfg = Field(default_factory=PositionCfg)
     run: RunCfg = Field(default_factory=RunCfg)
     web: WebCfg = Field(default_factory=WebCfg)
+    payments: PaymentsCfg = Field(default_factory=PaymentsCfg)
     storage: StorageCfg = Field(default_factory=StorageCfg)
     alerts: AlertsCfg = Field(default_factory=AlertsCfg)
 
@@ -415,6 +437,10 @@ class Secrets(BaseSettings):
 
     helius_api_key: str = ""
     groq_api_key: str = ""  # optional: free-tier hosted Llama for the web AI analyst when self-hosting Ollama isn't viable
+    # ADR-047 PRO pass. payout_wallet is a PUBLIC address (env wins over config.yaml — easier per-deploy);
+    # pass_secret signs the HMAC pass tokens and MUST stay in .env only. Payments stay off without both.
+    payout_wallet: str = ""
+    pass_secret: str = ""
     rugcheck_api_key: str = ""
     tweetscout_api_key: str = ""
     telegram_api_id: str = ""

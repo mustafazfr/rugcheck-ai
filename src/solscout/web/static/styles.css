@@ -233,10 +233,6 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .ai .flags{margin-top:12px;display:flex;gap:7px;flex-wrap:wrap}
 .ai .flag{font-size:11px;color:var(--red);border:1px solid rgba(255,77,87,.35);background:rgba(255,77,87,.08);padding:3px 9px;border-radius:6px}
 .muted-note{color:var(--faint);font-size:12px}
-.watcher-quote{margin-top:12px;font-family:var(--disp);font-size:13.5px;font-style:italic;color:var(--verdict);
-  border-left:2px solid var(--verdict);padding:6px 0 6px 12px;line-height:1.45}
-.watcher-by{display:block;font-style:normal;font-size:10px;letter-spacing:.14em;color:var(--faint);text-transform:uppercase;margin-top:4px}
-
 /* deployer / wallet id */
 .wallet-id{display:flex;align-items:center;gap:12px;margin-bottom:14px}
 .wallet-id code{font-size:14px;color:var(--ink);background:var(--panel2);border:1px solid var(--line2);padding:6px 11px;border-radius:8px}
@@ -282,22 +278,6 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .srisks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .srisk{font-size:10.5px;color:var(--amber);border:1px solid rgba(255,176,46,.3);background:rgba(255,176,46,.07);padding:2px 8px;border-radius:6px}
 
-/* the watcher — reactive meme face shown in the verdict corner (real gif + SVG fallback) */
-/* gif/svg fill their slot; gif gets a framed, theme-tinted card so it sits in the lab aesthetic */
-.watcher-gif,.watcher-svg{width:100%;height:100%;display:block}
-.watcher-gif{object-fit:cover;border-radius:10px;border:1px solid var(--line2);
-  filter:grayscale(.35) contrast(1.05);box-shadow:0 8px 24px -12px rgba(0,0,0,.8)}
-.watcher-svg .head{fill:rgba(255,255,255,.02)}
-.watcher-svg.glare{animation:glare-shudder 2.6s ease-in-out infinite}
-@keyframes glare-shudder{0%,100%{transform:none}3%{transform:translateX(-1px)}6%{transform:translateX(1px)}9%{transform:none}}
-/* verdict-corner reaction: top-right of the verdict card. glare gets a red ring, clean gets a lime ring */
-.watcher-corner{position:absolute;top:14px;right:16px;width:212px;height:178px;z-index:2;pointer-events:none;
-  opacity:1;transition:opacity 1.5s ease}
-.watcher-corner.faded{opacity:0}  /* after ~2–3 plays the JS adds this → soft fade-out, not an abrupt cut */
-.watcher-corner .watcher-gif{border-color:var(--verdict);filter:brightness(1.16) contrast(1.06) saturate(1.05);
-  box-shadow:0 0 0 1px var(--verdict-soft),0 0 18px var(--verdict-soft)}
-.watcher-corner .watcher-svg{color:var(--verdict);filter:drop-shadow(0 0 10px var(--verdict-soft))}
-@media(max-width:760px){.watcher-corner{display:none}}
 
 /* footer */
 .foot{border-top:1px solid var(--line2);padding:30px 24px;text-align:center;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:6px}
@@ -312,3 +292,33 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
   .verdict-wrap::after{display:none}
   .links,.counts,.token-id{justify-content:center}
 }
+
+/* — PRO pass modal (ADR-047): neon lab voice — */
+button#proBtn{cursor:pointer;background:rgba(196,247,58,.06);font-family:inherit;
+  color:var(--lime);border-color:rgba(196,247,58,.45)}
+button#proBtn:hover{background:rgba(196,247,58,.14)}
+button#proBtn.active{background:var(--lime);color:#0a1206;border-color:var(--lime)}
+.paywrap{position:fixed;inset:0;z-index:80;background:rgba(3,5,7,.74);backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;padding:18px}
+.paycard{position:relative;width:min(450px,94vw);background:var(--panel);
+  border:1px solid rgba(196,247,58,.22);border-radius:var(--r);padding:26px 26px 16px;
+  box-shadow:0 30px 90px rgba(0,0,0,.65),0 0 40px rgba(196,247,58,.06)}
+.paycard h3{font-size:20px;letter-spacing:.04em;color:var(--lime)}
+.payx{position:absolute;top:10px;right:14px;background:none;border:0;color:var(--muted);
+  font-size:22px;line-height:1;cursor:pointer}
+.payx:hover{color:var(--ink)}
+.paylead{color:var(--ink);margin:10px 0 6px}
+.payperks{margin:6px 0 14px;padding-left:18px;color:var(--muted)}
+.payperks li{margin:3px 0}
+.paygo{width:100%;padding:13px;border-radius:10px;border:1px solid var(--lime);
+  background:rgba(196,247,58,.12);color:var(--lime);font-family:var(--disp);font-size:15px;
+  font-weight:600;letter-spacing:.06em;cursor:pointer;transition:.15s}
+.paygo:hover{background:var(--lime);color:#0a1206}
+.paystep{min-height:18px;margin-top:10px;color:var(--cyan);font-size:12px;letter-spacing:.04em}
+.payok{color:var(--lime);font-weight:600}
+.payerr{color:var(--red);font-size:12.5px}
+.payrestore{background:none;border:0;color:var(--muted);text-decoration:underline;cursor:pointer;
+  font:inherit;font-size:12px;margin-top:4px;padding:0}
+.payrestore:hover{color:var(--ink)}
+.paynote{color:var(--faint);font-size:11px;line-height:1.5;border-top:1px solid var(--line2);
+  padding-top:10px;margin-top:14px}

@@ -487,13 +487,13 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
 
     # — Social / AI —
     if a.llm:
-        out.append(_check("ai_rug", "AI scam-language scan (Qwen)", "Social & AI",
+        out.append(_check("ai_rug", "AI scam-language scan (Qwen)", "Social & Web",
                           "fail" if has("llm_rug") else "pass",
                           (", ".join(a.llm.scam_language_flags[:3]) if a.llm.scam_language_flags else "No scam-language tells")))
     tw = (osint.get("twitter") or {})
     if tw.get("available"):
         v = tw.get("verdict")
-        out.append(_check("tw", "Twitter/X identity credible", "Social & AI",
+        out.append(_check("tw", "Twitter/X identity credible", "Social & Web",
                           "fail" if has("twitter_inauthentic") else ("warn" if v in ("weak",) else "pass"),
                           f"@{tw.get('handle')} · {_tw_age(tw.get('age_days'))} · {_compact(tw.get('followers'))} followers"
                           + (" · verified" if tw.get("verified") else "")))
@@ -501,39 +501,39 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
         tl = tw.get("timeline") or {}
         if tl.get("count"):
             oc = tl.get("other_ca_count", 0)
-            out.append(_check("tw_shill", "Account isn't a serial token-shiller", "Social & AI",
+            out.append(_check("tw_shill", "Account isn't a serial token-shiller", "Social & Web",
                               "fail" if has("twitter_serial_shill") else "pass",
                               (f"Recent tweets push {oc} OTHER token CAs — pumps token after token"
                                if has("twitter_serial_shill")
                                else f"{oc} other token CAs in recent tweets")))
             mm = tl.get("mint_mentions", 0)
-            out.append(_check("tw_ca", "Account actually posted this token", "Social & AI",
+            out.append(_check("tw_ca", "Account actually posted this token", "Social & Web",
                               "warn" if has("twitter_no_ca_mention") else "pass",
                               (f"This mint never appears in {tl['count']} recent tweets — account may be unrelated/hijacked"
                                if has("twitter_no_ca_mention")
                                else f"Mentions this mint {mm}× in recent tweets" if mm
                                else "Not in recent tweets (normal for an established token)")))
             if tl.get("burst_max_1h") is not None:
-                out.append(_check("tw_cadence", "Posting cadence looks human", "Social & AI",
+                out.append(_check("tw_cadence", "Posting cadence looks human", "Social & Web",
                                   "warn" if has("twitter_burst_posting") else "pass",
                                   (f"{tl['burst_max_1h']} tweets inside one hour — bot-like burst"
                                    if has("twitter_burst_posting")
                                    else f"~{tl.get('per_day') or '?'} tweets/day · last {tl.get('last_tweet_age_days', '?')}d ago")))
         if tw.get("id_joined_mismatch_days") is not None:
-            out.append(_check("tw_id", "Account creation date checks out", "Social & AI",
+            out.append(_check("tw_id", "Account creation date checks out", "Social & Web",
                               "fail" if has("twitter_id_mismatch") else "pass",
                               (f"Snowflake-ID date differs from the claimed join date by {tw['id_joined_mismatch_days']}d — forged/recycled identity"
                                if has("twitter_id_mismatch")
                                else "ID-derived creation date matches the profile")))
         if tw.get("website_match") is not None:
-            out.append(_check("tw_site", "Bio website matches the token's site", "Social & AI",
+            out.append(_check("tw_site", "Bio website matches the token's site", "Social & Web",
                               "warn" if has("twitter_site_mismatch") else "pass",
                               ("X bio links a DIFFERENT site than the token lists — possibly someone else's account"
                                if has("twitter_site_mismatch") else "Same website on both sides")))
     elif tw.get("linked") is False:
-        out.append(_check("tw", "Twitter/X linked", "Social & AI", "warn", "No Twitter/X account linked on DexScreener"))
+        out.append(_check("tw", "Twitter/X linked", "Social & Web", "warn", "No Twitter/X account linked on DexScreener"))
     if a.social and a.social.handle_reuse_count:
-        out.append(_check("handle", "Twitter handle not reused", "Social & AI",
+        out.append(_check("handle", "Twitter handle not reused", "Social & Web",
                           "fail" if has("twitter_handle_reuse") else "pass",
                           f"Handle attached to {a.social.handle_reuse_count} other tokens"))
 
@@ -541,7 +541,7 @@ def _build_checks(a, cfg, all_flags, osint=None) -> list[dict]:
     ws = (osint.get("website") or {})
     if ws.get("domain"):
         age = ws.get("age_days")
-        out.append(_check("site_age", "Project website isn't a throwaway", "Social & AI",
+        out.append(_check("site_age", "Project website isn't a throwaway", "Social & Web",
                           "warn" if has("website_brand_new") else ("pass" if age is not None else "skip"),
                           (f"{ws['domain']} registered only {age}d ago — throwaway-domain tell"
                            if has("website_brand_new")

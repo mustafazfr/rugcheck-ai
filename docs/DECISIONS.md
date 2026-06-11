@@ -702,3 +702,87 @@ already-fetched RugCheck/GoPlus fields) were unused.
 **Honest note:** the syndication timeline 429s aggressively per IP — the timeline section simply doesn't
 render when throttled (fail-open), so don't expect it on every check. The Jupiter/RDAP/Twitter signals are
 heuristics feeding the deterministic flag tiers; the LLM still never decides. 251 tests pass.
+
+---
+
+## ADR-047 — The case file IS the brand + PRO pass (non-custodial one-time payment)
+
+**Date:** 2026-06-12 · **Status:** accepted · **Context:** the owner picked design B outright
+("avukat dosyası gibi yaptığın çok daha güzel") and asked for a one-time 0.1 SOL wallet payment,
+paid straight to his own wallet, ahead of the naming + launch push.
+
+**Decisions:**
+- **B ("the case file") is the default for everyone.** The A/B coin flip is gone; `?v=a` still
+  works and sticks (localStorage key bumped `rc_v` → `rc_v2` so stale coin-flip assignments are
+  forgotten). Rationale over data: pre-launch traffic could never power the A/B test to
+  significance, every competitor is dark-neon (A blends in, B is instantly recognizable in
+  screenshots), and the paper metaphor extends naturally into product (print/PDF dossiers).
+  `ab_events` plumbing stays — it keeps measuring whatever mix `?v=` produces.
+- **Hero simplified to one line** ("Paste a mint — 35+ free forensic checks, one stamped verdict,
+  in seconds."), and the scan log speaks per-variant: B gets case-file vocabulary ("subpoenaing
+  authorities… dusting for prints… interviewing wallets") mapped 1:1 to the same honest pipeline steps.
+- **PRO pass — the monetization model the owner chose:** ONE-TIME `price_sol` (0.1) → that wallet
+  scans with **no daily limits, forever** (plus on-demand refresh and a bigger burst bucket keyed by
+  wallet, not IP). The free tier stays exactly as is — free verdict + the ADR-046 abuse limits; the
+  pass only lifts limits. Helius budgets (monthly governor + daily cap) still bound PRO spend: the
+  pass buys priority, not the right to drain the credit pool.
+- **Non-custodial by construction.** `POST /api/pay/intent` mints a random *reference* pubkey (the
+  private half is discarded on the spot); the buyer's own wallet signs ONE `SystemProgram.transfer`
+  buyer→`PAYOUT_WALLET` with the reference attached as a read-only key; `POST /api/pay/confirm`
+  fetches the tx (`getTransaction`, jsonParsed) and verifies from **balance deltas** (not instruction
+  shapes): success, reference present, payout gained ≥ price → grant pass to the fee payer + HMAC
+  token (`PASS_SECRET`, .env only). Replay-proof: `sig UNIQUE` + the reference binds a tx to ONE
+  intent. `POST /api/pay/restore` re-issues the token on a new device via `signMessage` (ed25519
+  verified with solders, ±10 min freshness). The server never holds a key, funds, or refunds — the
+  transfer is wallet-to-wallet on chain.
+- **Fail-safe posture (Golden Rule):** `payments.enabled: false` by default; even when true, missing
+  `PAYOUT_WALLET`/`PASS_SECRET` or an unparseable payout pubkey forces payments OFF with an error log
+  — the free product never depends on the paid path. Frontend shows the ★ PRO button only after
+  `GET /api/pay/status` says enabled. web3.js is version-pinned (never `@latest`), loaded lazily on
+  the first pay click, and self-hostable under `/static/vendor/` at deploy.
+- **Paid intents are the revenue ledger:** `pay_intents` rows with `status='paid'` are never pruned.
+
+**Known limits (accepted, documented):** a pass token is bearer-style — a holder could share it
+(0.1 SOL price + wallet-keyed burst + global Helius budgets make this a non-issue at launch scale).
+Wallet-connect needs an injected provider (Phantom/Solflare/Backpack or a wallet's in-app browser);
+a Solana Pay QR fallback for plain mobile browsers is the natural v2. 274 tests pass.
+
+**Name search (live RDAP check, 2026-06-12):** free at check time — rugdossier.com/.xyz,
+tokenautopsy.com, isitarug.xyz, rugornot.xyz, mintverdict.xyz, soldossier.xyz; taken — mintcase.*,
+solcase.xyz, exhibita.xyz, rugreport.*, solsleuth.xyz, isitarug.com, rugornot.com. Owner picks.
+
+---
+
+## ADR-048 — Trial paywall (1 free fresh scan/day), AI analyst removed from the product, hardening
+
+**Date:** 2026-06-12 · **Status:** accepted · **Context:** owner direction in-session: "deneme için
+0.1 sol ödemeden günlük 1 arama yapabilsinler — uyarı vermesin, 2.de direkt ödeme ekranı gelsin",
+"AI Analyst ... kaldıralım hiç gerek yok", "[polaroid'i] kaldıralım", "ssl sertifikasını falan da
+hallet güvenli yapalım".
+
+**Decisions:**
+- **Trial freemium:** `rate.daily_unique_mints_per_ip: 1` — one free FRESH analysis per IP per UTC
+  day. No counters, no warnings anywhere in the UI; the 2nd fresh scan of the day opens the PRO
+  payment sheet directly (`openPay(true)`, title flips to "Today's free scan is used"). Nuances that
+  keep it feeling fair: cached reports serve unlimited (re-checking a coin is always free, only NEW
+  case files count) and PRO wallets skip the ledger entirely. The knob is one config line — the
+  honest expectation set with the owner: if launch conversion dies, raise it to 2-3, don't rebuild.
+- **AI analyst OUT of the product** (module stays in repo for the dormant trading funnel). Even at
+  $0 (Groq free/local Ollama) it was the slowest pipeline stage, the largest prompt-injection
+  surface, and informationally derivative — the verdict was always the deterministic engine. Removed:
+  the api call + groq state, the frontend panel, the "AI synthesis" scan-log step, the health claim.
+  Category "Social & AI" → "Social & Web". Scan now ends on the (honest) slow step: the wallet trace.
+- **Watcher/polaroid removed** (owner pointed at it: "bunu kaldıralım") — verdict card is cleaner;
+  the unused mp4s stay in `static/watcher/` (user-supplied media, not code).
+- **Hardening (the part of "SSL/güvenlik" doable before a domain exists):** security-headers
+  middleware behind `web.security_headers` — CSP (no inline scripts: the variant bootstrap moved to
+  `static/boot.js`, still render-blocking by design so the theme paints first), nosniff, DENY
+  framing, referrer + permissions policies, HSTS auto-on when `rate.trust_proxy=true` (i.e. behind
+  Caddy/Cloudflare TLS). Actual certificates arrive with the domain at deploy: Caddy auto-TLS — Faz D.
+- **Name direction (owner: "rugforensics tarzı ... ya da judge-rug"):** RDAP 2026-06-12, ALL free:
+  rugforensics.com/.xyz, rugjudge.com/.xyz, judgerug.com/.xyz, rugcourt.xyz, rugjury.com/.xyz,
+  rugverdict.com/.xyz.
+
+**Next (planned with the owner):** Faz B parchment-scroll report skin + page animations; Faz C
+decision-logic audit (per-check source→score-impact→false-positive table) + adaptive holders panel;
+Faz D deploy pack (Caddyfile auto-TLS + systemd + Cloudflare). 274 tests pass.
