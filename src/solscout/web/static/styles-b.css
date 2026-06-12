@@ -115,8 +115,38 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 .scan-log li.cur{color:var(--ink)}
 @keyframes logIn{to{opacity:1;transform:none}}
 
+/* — ADR-050: the whole report is ONE parchment scroll (the owner's asset, sliced).
+   .scroll-top/.scroll-bottom keep the photographic roll ends at native scale via border-image
+   side-slices; .scroll-body repeats the parchment texture vertically for any report length.
+   The bottom roll is STICKY: it pins to the viewport bottom and the page unrolls from beneath
+   it as you scroll — the effect the owner described ("kaydırdıkça açılıyor"). — */
+.scrollwrap{position:relative;margin-top:24px}
+.scroll-top{height:96px;border-style:solid;border-width:0 90px;
+  border-image:url("/static/scroll-top.png") 0 90 fill stretch;position:relative;z-index:3}
+.scroll-body{position:relative;z-index:1;margin-top:-2px;padding:4px 46px 22px;
+  /* photographic torn EDGES only (vertical repeat hides in a side strip); the center is flat
+     parchment matched to the asset's tone + fibre noise — full-width wrinkle tiles banded badly */
+  background:
+    url("/static/scroll-edge-l.png") left top / 46px auto repeat-y,
+    url("/static/scroll-edge-r.png") right top / 46px auto repeat-y,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.5' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .42  0 0 0 0 .33  0 0 0 0 .19  0 0 0 .10 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23p)'/%3E%3C/svg%3E") 44px 0 / 220px 220px repeat content-box,
+    linear-gradient(90deg, #e2cfa4 0%, #eddfbd 7%, #f0e3c4 50%, #eddfbd 93%, #e2cfa4 100%) 44px 0 / calc(100% - 88px) 100% no-repeat}
+.scroll-bottom{height:96px;border-style:solid;border-width:0 90px;
+  border-image:url("/static/scroll-bottom.png") 0 90 fill stretch;
+  position:sticky;bottom:-8px;z-index:4;margin-top:-4px;pointer-events:none}
+/* sections write ON the scroll: ink-drawn boxes instead of separate paper cards */
+.scroll-body .panel,.scroll-body .cat{background:transparent;box-shadow:none;border:1.5px solid rgba(43,38,32,.5)}
+.scroll-body .cat-h{background:rgba(43,38,32,.07)}
+.scroll-body .section-head{padding:0 12px}
+.scroll-body .checks,.scroll-body .cols{padding:0 12px}
+.scroll-body .panel[id]{margin-left:12px;margin-right:12px}
+.scroll-body .cols .panel{margin-left:0;margin-right:0}
+.scroll-body code,.scroll-body .t-dex,.scroll-body .wallet-id code{background:rgba(246,241,228,.55)}
+
 /* — reveal: sheets sliding onto the desk — */
-.reveal{opacity:0;transform:translateY(12px);animation:rise .55s cubic-bezier(.2,.7,.2,1) forwards}
+.reveal{opacity:0;transform:translateY(12px);animation:rise .55s cubic-bezier(.2,.7,.2,1) forwards;animation-play-state:paused}
+.reveal.in{animation-play-state:running}
+.reveal:not(.in) .check{animation-play-state:paused}
 @keyframes rise{to{opacity:1;transform:none}}
 .report > .reveal:nth-child(1){animation-delay:.02s}
 .checks .reveal{animation-delay:.05s}
@@ -151,19 +181,14 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 /* — verdict: the case-file cover sheet (the parchment-scroll experiment was reverted on the
    owner's review — this bordered cover with the dark CASE strip is the look he approved) — */
 .verdict-wrap{display:grid;grid-template-columns:240px 1fr;gap:30px;align-items:center;
-  /* the REAL scroll (owner: "2 boyutlu istemiyorum — png bul"): his reference asset, 9-sliced with
-     border-image. The photographic rolls/edges render at native resolution in the border zones and
-     ONLY the flat parchment body stretches with content — no 2D-gradient fakery left. */
-  border:90px solid transparent;border-width:88px 56px 96px;
-  border-image:url("/static/scroll.png") 88 56 96 fill stretch;
-  background:none;box-shadow:none;border-radius:0;
-  padding:0 4px;margin-top:10px;position:relative;
-  filter:drop-shadow(0 16px 18px rgba(43,38,32,.35))}
+  /* ADR-050: the verdict no longer carries its own paper — the WHOLE report is one scroll
+     (.scrollwrap below); this is just the top section written on it. */
+  background:transparent;border:0;box-shadow:none;border-radius:0;
+  padding:30px 30px 6px;margin-top:0;position:relative;filter:none}
 .verdict-wrap::before{content:"CASE Nº SOL-" attr(data-case) " · CONFIDENTIAL — FORENSIC REPORT";
-  position:absolute;top:-74px;left:0;right:0;z-index:2;text-align:center;
-  font-family:var(--disp);font-size:10px;letter-spacing:.24em;color:#4a3b28;text-transform:uppercase;
-  text-shadow:0 1px 0 rgba(255,250,235,.4)}
-.verdict-wrap::after{content:none}
+  position:absolute;top:2px;left:0;right:0;text-align:center;
+  font-family:var(--disp);font-size:10px;letter-spacing:.24em;color:#5d4e3a;text-transform:uppercase}
+.verdict-wrap::after{content:"";position:absolute;left:40px;right:40px;top:22px;border-top:1px dashed rgba(43,38,32,.35)}
 .gauge-box{margin-top:14px}
 .gauge{width:100%;height:auto;overflow:visible}
 .g-track{fill:none;stroke:rgba(43,38,32,.14);stroke-width:13;stroke-linecap:butt;
@@ -352,8 +377,12 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 .abline a{color:var(--cyan);text-decoration:underline}
 
 @media(max-width:760px){
-  .verdict-wrap{grid-template-columns:1fr;text-align:center;border-width:56px 26px 62px}
-  .verdict-wrap::before{font-size:8px;letter-spacing:.1em;top:-48px}
+  .verdict-wrap{grid-template-columns:1fr;text-align:center}
+  .verdict-wrap::before{font-size:8px;letter-spacing:.1em}
+  .scroll-top,.scroll-bottom{border-width:0 54px;height:64px}
+  .scroll-body{padding-left:30px;padding-right:30px;background-position:left top, right top, 28px 0, 28px 0;background-size:30px auto, 30px auto, 220px 220px, calc(100% - 56px) 100%}
+  .scroll-body .section-head,.scroll-body .checks,.scroll-body .cols{padding:0 8px}
+  .scroll-body .panel[id]{margin-left:8px;margin-right:8px}
   .gauge-box{max-width:200px;margin:14px auto 0}
   .cols{grid-template-columns:1fr}
   .links,.counts,.token-id{justify-content:center}
@@ -390,8 +419,4 @@ button#proBtn.active{background:var(--lime);border-color:var(--lime);color:var(-
 .paynote{color:var(--muted);font-size:11.5px;line-height:1.55;border-top:1px dashed var(--line);
   padding-top:10px;margin-top:14px;font-style:italic}
 
-/* — on the photographic parchment, muted tones drown in the wrinkles: ink up the verdict text — */
-.verdict-wrap .verdict-summary{color:#4d4133}
-.verdict-wrap .mint-line{color:#6b5c47}
-.verdict-wrap .t-dex{background:rgba(246,241,228,.55)}
 .verdict-wrap .links a{background:rgba(246,241,228,.6);border-radius:2px}

@@ -99,7 +99,8 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 @keyframes logIn{to{opacity:1;transform:none}}
 
 /* — reveal — */
-.reveal{opacity:0;transform:translateY(14px);animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards}
+.reveal{opacity:0;transform:translateY(14px);animation:rise .6s cubic-bezier(.2,.7,.2,1) forwards;animation-play-state:paused}
+.reveal.in{animation-play-state:running}
 @keyframes rise{to{opacity:1;transform:none}}
 .report > .reveal:nth-child(1){animation-delay:.02s}
 .checks .reveal{animation-delay:.05s}
@@ -322,3 +323,6 @@ button#proBtn.active{background:var(--lime);color:#0a1206;border-color:var(--lim
 .payrestore:hover{color:var(--ink)}
 .paynote{color:var(--faint);font-size:11px;line-height:1.5;border-top:1px solid var(--line2);
   padding-top:10px;margin-top:14px}
+
+/* ADR-050 (theme B's one-scroll layout): the roll caps don't exist in the lab skin */
+.scroll-top,.scroll-bottom{display:none}

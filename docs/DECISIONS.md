@@ -818,3 +818,31 @@ bitir işlerini").
   RugCheck, 2 SOFT + deployer counts from Jupiter.
 
 277 tests pass.
+
+---
+
+## ADR-050 — The WHOLE report is one parchment scroll (theme B)
+
+**Date:** 2026-06-12 · **Status:** accepted · **Context:** the owner's actual vision, finally stated
+plainly: not a parchment-styled verdict CARD but the ENTIRE page as one scroll — "bir parşömen kağıdı
+katlı şekilde geliyor, aşağı kaydırdıkça forensic checks kısmı açılıyor… whos behind it açılıyor".
+And no drawn/2D fakery: "2 boyutlu görsel istemiyorum… png bul".
+
+**Decisions:**
+- **One scroll, real asset.** The owner's reference parchment PNG is sliced into photographic parts:
+  `scroll-top.png` / `scroll-bottom.png` (roll ends kept at native scale via border-image side-slices)
+  and `scroll-edge-l/r.png` (torn side strips, repeat-y). The body CENTER is flat tone-matched
+  parchment + fibre noise — full-width wrinkle tiling banded badly (tried, rejected on screenshot).
+- **Unroll-on-scroll.** All `.reveal` animations are `animation-play-state:paused` until an
+  IntersectionObserver adds `.in` as the section enters the viewport (`setupReveals`, re-armed per
+  scan) — checks, then who's-behind-it, reveal as you scroll, exactly the described feel. Fallback:
+  no IO support → everything `.in` immediately.
+- **Sticky bottom roll.** `position:sticky; bottom:-8px` pins the bottom roll to the viewport while
+  the report passes — the page visually unrolls from beneath it. `pointer-events:none`.
+- Sections lost their separate paper cards inside the scroll (ink-drawn boxes on the one document);
+  verdict's own border/paper removed; CASE Nº is a typed line at the scroll's head. Theme A is
+  untouched (roll caps `display:none`; reveals gain the same scroll-gating).
+- Asset note: source is the owner's 360px reference — swap for a higher-res licensed scan at launch
+  if desired (slices regenerate with three sips commands, documented here).
+
+277 tests pass.

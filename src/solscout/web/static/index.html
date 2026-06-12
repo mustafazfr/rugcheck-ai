@@ -81,6 +81,11 @@
       <button type="submit"><span class="lbl">SCAN</span></button>
       <a class="newscan" href="/">↺ new</a>
     </form>
+    <!-- ADR-050: the WHOLE report is one parchment scroll (theme B) — top roll, body, bottom roll
+         (sticky: the page appears to unroll from it as you scroll). Theme A hides the roll caps. -->
+    <div class="scrollwrap">
+    <div class="scroll-top" aria-hidden="true"></div>
+    <div class="scroll-body">
     <!-- verdict -->
     <div class="verdict-wrap reveal">
       <div class="gauge-box">
@@ -148,6 +153,9 @@
       <h3>Source consensus <span class="byline">/ RugCheck + GoPlus + Jupiter</span></h3>
       <div id="rcBody"></div>
     </div>
+    </div><!-- /scroll-body -->
+    <div class="scroll-bottom" aria-hidden="true"></div>
+    </div><!-- /scrollwrap -->
   </section>
 </main>
 

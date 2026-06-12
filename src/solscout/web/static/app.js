@@ -208,9 +208,26 @@ function render(d) {
   renderInsiderNetworks(d.insider_networks);
   renderSources(d.sources, d.honeypot);
 
-  // re-trigger reveal animations
-  $$(".reveal", rep).forEach((el, i) => { el.style.animation = "none"; void el.offsetWidth; el.style.animation = ""; el.style.animationDelay = (i * 0.05) + "s"; });
+  // scroll-driven unroll (ADR-050): each section's animation stays PAUSED until it scrolls into
+  // view — the report reads as a scroll being unrolled, not a page that already happened.
+  setupReveals(rep);
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+// ADR-050: reveal-on-scroll. CSS keeps .reveal animations paused; entering the viewport adds .in
+// which lets them run once. Re-running a scan resets the classes so the unroll replays.
+let _io = null;
+function setupReveals(root) {
+  if (_io) _io.disconnect();
+  const els = $$(".reveal", root);
+  els.forEach((el) => { el.classList.remove("in"); el.style.animation = "none"; });
+  void root.offsetWidth;                     // flush so removing .in cleanly re-arms the animations
+  els.forEach((el) => { el.style.animation = ""; });
+  if (!("IntersectionObserver" in window)) { els.forEach((el) => el.classList.add("in")); return; }
+  _io = new IntersectionObserver((entries) => {
+    entries.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); _io.unobserve(e.target); } });
+  }, { rootMargin: "0px 0px -10% 0px", threshold: 0.04 });
+  els.forEach((el) => _io.observe(el));
 }
 
 function setGauge(score) {
