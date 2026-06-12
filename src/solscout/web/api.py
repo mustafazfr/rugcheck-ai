@@ -191,6 +191,9 @@ async def _rate_limit(request: Request, call_next):
     path = request.url.path
     if limiter is None or not path.startswith("/api/") or path == "/api/health":
         return await call_next(request)
+    # the owner's own machines (rate.exempt_ips — localhost by default) skip every limit
+    if _client_ip(request) in app.state.cfg.web.rate.exempt_ips:
+        return await call_next(request)
     # PRO pass (ADR-047): a valid X-Pass rides its own, larger bucket keyed by wallet instead of IP
     pro = _pro_wallet(request)
     if pro is not None:
@@ -204,10 +207,10 @@ async def _rate_limit(request: Request, call_next):
 
 @app.middleware("http")
 async def _security_headers(request: Request, call_next):
-    """ADR-048 hardening. CSP works because nothing is inline anymore (boot.js is external):
-    scripts only from us + the pinned unpkg web3.js; styles from us + Google Fonts (inline style
-    ATTRIBUTES are part of how app.js renders, hence 'unsafe-inline' on style-src only); images
-    https: (Twitter avatars). HSTS only makes sense once we're actually behind TLS → trust_proxy."""
+    """ADR-048 hardening. CSP works because nothing is inline anymore (boot.js is external) and
+    web3.js is self-hosted (static/vendor) — scripts come ONLY from us; styles from us + Google
+    Fonts (inline style ATTRIBUTES are part of how app.js renders, hence 'unsafe-inline' on
+    style-src only); images https: (Twitter avatars). HSTS once we're behind TLS → trust_proxy."""
     resp = await call_next(request)
     cfg = getattr(app.state, "cfg", None)
     if cfg is None or not cfg.web.security_headers:
@@ -219,7 +222,7 @@ async def _security_headers(request: Request, call_next):
     h.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
     h.setdefault(
         "Content-Security-Policy",
-        "default-src 'self'; script-src 'self' https://unpkg.com; "
+        "default-src 'self'; script-src 'self'; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
         "font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; "
         "connect-src 'self'; media-src 'self'; object-src 'none'; frame-ancestors 'none'; "
@@ -288,7 +291,8 @@ async def check(mint: str, request: Request, refresh: bool = False, variant: str
     now = time.monotonic()
     # PRO pass (ADR-047): paid wallets skip the daily fresh-mint ledger and get a snappier refresh
     # guard — but Helius budgets still apply (the governor protects the free tier, pass or not).
-    pro = _pro_wallet(request) is not None
+    # The owner's own IPs (rate.exempt_ips) get the same treatment without a pass.
+    pro = _pro_wallet(request) is not None or _client_ip(request) in app.state.cfg.web.rate.exempt_ips
     guard = app.state.cfg.payments.pro_refresh_guard_s if pro else web.min_refresh_interval_s
     hit = cache.get(mint)
     # L1 in-process. refresh=1 is honored only past the guard — a cache-busting loop can't

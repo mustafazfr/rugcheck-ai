@@ -347,6 +347,8 @@ class RateCfg(BaseModel):
     daily_unique_mints_per_ip: int = 1
     max_tracked_ips: int = 10_000  # LRU bound on the in-memory IP table
     trust_proxy: bool = False  # True behind a reverse proxy → honor the first X-Forwarded-For hop
+    # the owner's own machines never get limited — localhost by default; add your home IP at deploy
+    exempt_ips: list[str] = ["127.0.0.1", "::1", "localhost"]
 
 
 class WebCfg(BaseModel):

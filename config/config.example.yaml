@@ -269,6 +269,7 @@ web:
     daily_unique_mints_per_ip: 1
     max_tracked_ips: 10000
     trust_proxy: false         # true behind a reverse proxy → honor the first X-Forwarded-For hop
+    exempt_ips: ["127.0.0.1", "::1", "localhost"]  # the owner's machines — no limits ever; add your home IP at deploy
 
 # ADR-047 — PRO pass: ONE-TIME price_sol payment → that wallet scans without daily limits, forever.
 # Non-custodial: the buyer signs one transfer DIRECTLY to your payout wallet; we only verify it on-chain.

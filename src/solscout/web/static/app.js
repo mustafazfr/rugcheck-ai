@@ -481,15 +481,16 @@ function walletProvider() {
   return (window.phantom && window.phantom.solana) || window.solana || window.solflare ||
          (window.backpack && window.backpack.solana) || null;
 }
-// web3.js loads on demand (only when someone actually clicks pay) and version-PINNED — never @latest.
-// At deploy you can self-host this one file under /static/vendor/ and swap the src for zero third-party JS.
+// web3.js is SELF-HOSTED (static/vendor/, sha256-verified against two independent CDNs at vendoring
+// time) — zero third-party JS in the payment path, so a CDN compromise can't touch the payout flow,
+// and the CSP allows no external scripts at all. Still lazy: loads only when someone clicks pay.
 let _w3p = null;
 function loadWeb3() {
   if (window.solanaWeb3) return Promise.resolve(window.solanaWeb3);
   if (_w3p) return _w3p;
   _w3p = new Promise((res, rej) => {
     const s = document.createElement("script");
-    s.src = "https://unpkg.com/@solana/web3.js@1.95.8/lib/index.iife.min.js";
+    s.src = "/static/vendor/web3-1.95.8.min.js";
     s.onload = () => (window.solanaWeb3 ? res(window.solanaWeb3) : rej(new Error("wallet library failed to load")));
     s.onerror = () => rej(new Error("wallet library failed to load"));
     document.head.appendChild(s);

@@ -121,6 +121,29 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 @keyframes rise{to{opacity:1;transform:none}}
 .report > .reveal:nth-child(1){animation-delay:.02s}
 .checks .reveal{animation-delay:.05s}
+/* the cover sheet UNROLLS from its top roll (clip insets are negative so the roll overhang + the
+   sheet shadow are never clipped); panels LAY onto the desk with a tiny settling rotation */
+.verdict-wrap.reveal{animation:unroll .95s cubic-bezier(.22,.85,.3,1) forwards}
+@keyframes unroll{
+  0%{opacity:1;clip-path:inset(-44px -60px 86% -60px);transform:translateY(-5px)}
+  72%{clip-path:inset(-44px -60px -8% -60px)}
+  100%{opacity:1;clip-path:inset(-44px -60px -64px -60px);transform:none}}
+.panel.reveal{animation-name:lay-sheet}
+.cols .panel.reveal:last-child{animation-name:lay-sheet-l}
+@keyframes lay-sheet{0%{opacity:0;transform:translateY(15px) rotate(.6deg)}100%{opacity:1;transform:none}}
+@keyframes lay-sheet-l{0%{opacity:0;transform:translateY(15px) rotate(-.6deg)}100%{opacity:1;transform:none}}
+/* evidence rows ink in line by line (delay capped so long lists don't crawl) */
+.check{opacity:0;animation:ink-in .26s ease-out forwards}
+.cat .check:nth-child(3){animation-delay:.05s}
+.cat .check:nth-child(4){animation-delay:.1s}
+.cat .check:nth-child(5){animation-delay:.15s}
+.cat .check:nth-child(6){animation-delay:.2s}
+.cat .check:nth-child(n+7){animation-delay:.25s}
+@keyframes ink-in{from{opacity:0;transform:translateX(-5px)}to{opacity:1;transform:none}}
+/* hero: the desk sets itself when you arrive */
+.hero .kicker,.hero .headline,.hero .sub,.hero .searchbar,.hero .examples{opacity:0;animation:rise .5s ease forwards}
+.hero .kicker{animation-delay:.04s}.hero .headline{animation-delay:.1s}.hero .sub{animation-delay:.18s}
+.hero .searchbar{animation-delay:.26s}.hero .examples{animation-delay:.34s}
 
 /* — rescan bar — */
 .rescan{display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--ink);
@@ -132,14 +155,35 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 .rescan .newscan{color:var(--muted);font-family:var(--mono);font-size:12px;padding:0 8px;white-space:nowrap}
 .rescan .newscan:hover{color:var(--red)}
 
-/* — verdict: the case-file cover sheet — */
+/* — verdict: an unrolled scroll (the user's parchment reference — the CURL, not a costume) —
+   top = a shaded paper roll carrying the case number; body = aged sheet with corner foxing and a
+   faint crease; bottom = torn deckle (desk-coloured teeth biting in). No ruled border: a scroll's
+   edge is its shadow. Sub-panels stay bordered file sheets on purpose — the cover IS the scroll. */
 .verdict-wrap{display:grid;grid-template-columns:240px 1fr;gap:30px;align-items:center;
-  background:var(--panel);border:1.5px solid var(--ink);border-radius:var(--r);
-  padding:34px 30px 30px;margin-top:26px;position:relative;box-shadow:var(--shadow)}
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255,252,242,.6), transparent 55%),
+    radial-gradient(34% 30% at 0% 100%, rgba(120,84,40,.12), transparent 72%),
+    radial-gradient(34% 30% at 100% 100%, rgba(120,84,40,.14), transparent 72%),
+    radial-gradient(26% 22% at 100% 0%, rgba(120,84,40,.08), transparent 75%),
+    linear-gradient(173deg, transparent 48.9%, rgba(43,38,32,.05) 49.3%, rgba(255,255,255,.35) 49.7%, transparent 50.1%),
+    var(--panel);
+  border:0;border-radius:2px;
+  padding:50px 34px 40px;margin-top:34px;position:relative;
+  box-shadow:0 16px 36px -18px rgba(43,38,32,.55), 4px 6px 0 -2px rgba(43,38,32,.12)}
 .verdict-wrap::before{content:"CASE Nº SOL-" attr(data-case) " · CONFIDENTIAL — FORENSIC REPORT";
-  position:absolute;top:0;left:0;right:0;padding:6px 14px;font-family:var(--disp);font-size:10px;
-  letter-spacing:.22em;color:var(--panel);background:var(--ink);text-transform:uppercase}
-.verdict-wrap::after{content:"";position:absolute;left:14px;right:14px;top:30px;border-top:1px dashed var(--line)}
+  position:absolute;top:-17px;left:-13px;right:-13px;height:37px;z-index:2;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--disp);font-size:10px;letter-spacing:.22em;color:#6a5d4b;text-transform:uppercase;
+  background:
+    radial-gradient(10px 15px at 8px 50%, #715f4a 0 54%, transparent 56%),
+    radial-gradient(10px 15px at calc(100% - 8px) 50%, #715f4a 0 54%, transparent 56%),
+    linear-gradient(180deg,#e9dfc8 0%,#f9f4e7 24%,#e8dec6 55%,#cdbf9f 80%,#a8967a 94%,#8e7c64 100%);
+  border-radius:19px / 15px;
+  box-shadow:0 8px 10px -5px rgba(43,38,32,.5), inset 0 -3px 4px rgba(43,38,32,.22), inset 0 1px 0 rgba(255,255,255,.75)}
+.verdict-wrap::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:9px;z-index:1;
+  background:
+    linear-gradient(45deg, var(--bg) 25%, transparent 25.5%) -9px 0/18px 18px repeat-x,
+    linear-gradient(-45deg, var(--bg) 25%, transparent 25.5%) -9px 0/18px 18px repeat-x}
 .gauge-box{margin-top:14px}
 .gauge{width:100%;height:auto;overflow:visible}
 .g-track{fill:none;stroke:rgba(43,38,32,.14);stroke-width:13;stroke-linecap:butt;
@@ -155,7 +199,7 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
   padding:8px 18px;border:3px double var(--verdict);border-radius:4px;color:var(--verdict);
   background:transparent;margin-bottom:14px;transform:rotate(-5deg);
   text-shadow:.6px .6px 0 var(--verdict-soft);
-  animation:stamp-slam .55s cubic-bezier(.16,1.3,.3,1) .35s backwards;
+  animation:stamp-slam .55s cubic-bezier(.16,1.3,.3,1) .75s backwards;
   mask-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='80' height='80'%3E%3Cfilter id='r'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='2'/%3E%3CfeColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .92 .08'/%3E%3C/filter%3E%3Crect width='80' height='80' filter='url(%23r)'/%3E%3C/svg%3E");
   mask-size:80px 80px}
 @keyframes stamp-slam{
@@ -165,7 +209,7 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
   100%{transform:rotate(-5deg) scale(1)}}
 /* the sheet content flinches when the stamp lands (NOT on .verdict-wrap — that would override
    the .reveal rise animation and leave the card stuck at opacity:0) */
-.verdict-main{animation:sheet-thud .3s ease-out .62s}
+.verdict-main{animation:sheet-thud .3s ease-out 1.02s}
 @keyframes sheet-thud{0%{transform:none}30%{transform:translateY(2px) rotate(.15deg)}100%{transform:none}}
 .token-id{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:8px}
 .t-name{font-family:var(--disp);font-size:27px}
@@ -329,6 +373,7 @@ main{max-width:1080px;margin:0 auto;padding:0 24px 80px}
 
 @media(max-width:760px){
   .verdict-wrap{grid-template-columns:1fr;text-align:center}
+  .verdict-wrap::before{content:"CASE Nº SOL-" attr(data-case);font-size:9px;letter-spacing:.16em}
   .gauge-box{max-width:200px;margin:14px auto 0}
   .cols{grid-template-columns:1fr}
   .links,.counts,.token-id{justify-content:center}
