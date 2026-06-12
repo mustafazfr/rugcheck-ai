@@ -1,0 +1,10 @@
+# rugcheck (name TBD) — Caddy reverse proxy with AUTOMATIC HTTPS (Let's Encrypt, $0).
+# Replace YOURDOMAIN.xyz after buying the domain; certificates are issued + renewed automatically.
+YOURDOMAIN.xyz {
+	encode zstd gzip
+	reverse_proxy 127.0.0.1:8000
+	# Caddy terminates TLS; the app adds CSP/HSTS itself (web.security_headers + rate.trust_proxy: true)
+}
+www.YOURDOMAIN.xyz {
+	redir https://YOURDOMAIN.xyz{uri} permanent
+}

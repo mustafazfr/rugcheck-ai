@@ -203,7 +203,7 @@ function render(d) {
   // deployer / twitter / holders+buyers / sources / ai
   renderDeployer(d.deployer);
   renderTwitter(d.twitter);
-  renderHolders(d.holders, d.holders_intel, d.labels);
+  renderHolders(d.holders, d.holders_intel, d.labels, d.market);
   renderMarket(d.market, d.flow, d.overview);
   renderInsiderNetworks(d.insider_networks);
   renderSources(d.sources, d.honeypot);
@@ -249,7 +249,12 @@ function renderChecks(checks) {
   }).join("");
 }
 
-function renderHolders(h, intel, labels) {
+// adaptive holders (ADR-049): the full lineup + fresh-buyer forensics is the point on YOUNG case
+// files; on established/big tokens it's familiar noise — collapse to the stat row + an expand link.
+// Any fresh-buyer signal forces the full view regardless (forensics outrank tidiness).
+const HOLDERS_FULL_MAX_AGE_D = 90, HOLDERS_FULL_MAX_COUNT = 50000;
+
+function renderHolders(h, intel, labels, market) {
   if (!h || (h.count == null && !(h.distribution || []).length)) {
     $("#hStat").innerHTML = `<span class="muted-note">Holder set not fully resolvable (token too large or not indexed).</span>`;
     $("#holderBars").innerHTML = ""; return;
@@ -266,7 +271,7 @@ function renderHolders(h, intel, labels) {
   (intel && intel.rows || []).forEach((r) => byOwner[r.owner] = r);
   const dist = (h.distribution || []).slice(0, 12);
   const max = Math.max(1, ...dist.map((x) => x.pct));
-  $("#holderBars").innerHTML = dist.map((x, i) => {
+  let bars = dist.map((x, i) => {
     const r = byOwner[x.owner];
     const lbl = labels[x.owner];
     const tag = lbl ? `<span class="wtag known">${esc(lbl)}</span>`
@@ -276,13 +281,24 @@ function renderHolders(h, intel, labels) {
     `<span class="pct">${x.pct.toFixed(1)}%</span></div>`;
   }).join("");
   if (intel && intel.profiled) {
-    $("#holderBars").insertAdjacentHTML("beforeend",
-      `<div class="legend"><b>fresh</b> = near-empty / brand-new wallet (almost no trade history) — ` +
+    bars += `<div class="legend"><b>fresh</b> = near-empty / brand-new wallet (almost no trade history) — ` +
       `we traced the top ${intel.profiled} holders and ${intel.fresh} look like that. ` +
       `Many fresh wallets = likely insider/sybil cluster faking the holder count. ` +
-      `<span class="wtag trader">trader</span> = a real, active wallet.</div>`);
+      `<span class="wtag trader">trader</span> = a real, active wallet.</div>`;
   }
-  requestAnimationFrame(() => $$("#holderBars .bar-fill").forEach((b) => b.style.width = b.dataset.w + "%"));
+  const fill = () => requestAnimationFrame(() => $$("#holderBars .bar-fill").forEach((b) => b.style.width = b.dataset.w + "%"));
+  const ageD = market && market.age_minutes != null ? market.age_minutes / 1440 : null;
+  const established = (ageD != null && ageD > HOLDERS_FULL_MAX_AGE_D) ||
+                      (h.count != null && h.count > HOLDERS_FULL_MAX_COUNT);
+  if (established && bars && !(fresh > 0)) {
+    $("#holderBars").innerHTML =
+      `<div class="legend">Established token — distribution summarized above; nothing anomalous flagged ` +
+      `in the lineup.</div><button class="chip" id="holdersMore">show full holder lineup</button>`;
+    $("#holdersMore").addEventListener("click", () => { $("#holderBars").innerHTML = bars; fill(); });
+    return;
+  }
+  $("#holderBars").innerHTML = bars;
+  fill();
 }
 
 function renderDeployer(dep) {

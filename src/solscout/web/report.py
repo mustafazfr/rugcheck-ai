@@ -116,6 +116,7 @@ def build_report(a, cfg, *, osint: dict | None = None, took_ms: int | None = Non
     metrics = filt.metrics or {}
     all_flags = set(filt.hard_flags or []) | set(dec.veto_flags or []) | set(osint.get("flags") or [])
     all_flags |= _intel_flags(a, cfg, osint, all_flags)  # ADR-046 zero-cost intelligence pack
+    all_flags = _consensus_filter(mi, all_flags)  # ADR-049: chain truth outranks 3rd-party authority claims
 
     checks = _build_checks(a, cfg, all_flags, osint)
     score, level = _score_and_level(filt, metrics, all_flags)
@@ -227,6 +228,22 @@ def _pretty(flag: str) -> str:
 
 def _check(cid, label, category, status, detail) -> dict:
     return {"id": cid, "label": label, "category": category, "status": status, "detail": detail}
+
+
+def _consensus_filter(mi, flags: set) -> set:
+    """ADR-049 hardening (the WIF-class FP pattern): our own RPC read of mint/freeze authority is the
+    CHAIN truth. If GoPlus claims an authority is live while the chain says renounced, that's GoPlus
+    being stale/wrong about this mint — downgrade to the SOFT data-integrity nudge instead of letting
+    a 3rd party alone CRITICAL a provably clean token. (When the chain itself says the authority is
+    live, our own mint/freeze CRITICALs fire regardless — this can never weaken real detection.)"""
+    if mi is None:
+        return flags
+    out = set(flags)
+    for gp_flag, live in (("goplus_mintable", mi.mint_authority), ("goplus_freezable", mi.freeze_authority)):
+        if gp_flag in out and live is None:
+            out.discard(gp_flag)
+            out.add("authority_consensus_mismatch")
+    return out
 
 
 def _intel_flags(a, cfg, osint, existing: set) -> set:

@@ -786,3 +786,35 @@ hallet güvenli yapalım".
 **Next (planned with the owner):** Faz B parchment-scroll report skin + page animations; Faz C
 decision-logic audit (per-check source→score-impact→false-positive table) + adaptive holders panel;
 Faz D deploy pack (Caddyfile auto-TLS + systemd + Cloudflare). 274 tests pass.
+
+---
+
+## ADR-049 — Parchment v2 material, chain-truth consensus filter, adaptive holders, audit
+
+**Date:** 2026-06-12 · **Status:** accepted · **Context:** owner rejected the parchment v1 roll
+("baya kötü olmuş", a scroll glitch, a mystery coffee-ring); after the revert he clarified he DOES
+want the parchment FEEL ("kâğıdı parşömene benzetmemişsin? neden?") and ordered Faz C ("geç C'ye
+bitir işlerini").
+
+**Decisions:**
+- **Parchment v2 = material, not props.** The approved forensic-report STRUCTURE stays (dark CASE
+  strip, borders, stamp); the paper itself became parchment: sepia fibre noise tile (feTurbulence
+  data-URI), warm tone falling toward the edges, inset edge-browning, warm-brown borders. No roll
+  cylinder, no crease lines across content, no coffee ring — that's where v1 died. Desk dimmed
+  (`--bg #dcd1b8`) + desk-lamp vignette; main column 1080→1240px ("aşırı boş/beyaz" complaint);
+  `overscroll-behavior-y:none` + the unroll clip-path animation removed (scroll-glitch suspects).
+  **Process rule going forward: vibe-level redesigns get a mock for approval before code.**
+- **Chain-truth consensus filter** (`report._consensus_filter`, tested): GoPlus `mintable/freezable`
+  claims are overruled by our own RPC authority read when the chain says renounced → downgraded to
+  SOFT `authority_consensus_mismatch`. A third party alone can no longer CRITICAL a provably clean
+  token (the WIF-class FP pattern, now closed on the GoPlus axis too).
+- **Adaptive holders panel** (owner: "ya revize edelim ya kaldıralım" → revised): tokens older than
+  90d or with >50k holders collapse the lineup to the stat row + an expand link; ANY fresh-buyer
+  signal forces the full forensic view. Young tokens unchanged — that's where the panel earns its keep.
+- **`docs/AUDIT-CHECKS.md`**: every flag → source → score impact → FP risk + what the audit verified,
+  what it changed, and an honest retro (mock-first rule, A/B outliving its question, derivative
+  features, Twitter fragility, limits-vs-budgets). Answers the owner's "GoPlus verisini gerçekten
+  kullanıyor muyuz?" — yes: 6 CRITICAL + 2 SOFT flags from GoPlus, 40% clean-path weight from
+  RugCheck, 2 SOFT + deployer counts from Jupiter.
+
+277 tests pass.

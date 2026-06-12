@@ -198,3 +198,37 @@ def test_insider_network_dominant_is_danger():
     r = build_report(_analysis(_clean_filt()), CFG, osint=osint)
     assert r["level"] in ("DANGER", "CRITICAL")
     assert any(c["id"] == "net_dom" and "38.0%" in c["detail"] for c in r["checks"])
+
+
+# — ADR-049: chain truth outranks 3rd-party authority claims (the WIF-class FP pattern) —
+
+def test_goplus_authority_claim_suppressed_when_chain_says_renounced():
+    """GoPlus says 'mintable' but our own RPC read says renounced → no CRITICAL from a 3rd party
+    alone; it degrades to the SOFT consensus-mismatch nudge."""
+    filt = FilterResult(mint="m", passed=True, safety_score=0.9,
+                        metrics={"liquidity_usd": 80_000, "goplus": {"available": True, "risks": []}},
+                        hard_flags=["goplus_mintable", "goplus_freezable"])
+    mi = MintInfo(mint="m", mint_authority=None, freeze_authority=None)
+    mk = TokenMarket(mint="m", name="Clean", symbol="CLN", liquidity_usd=80_000,
+                     buyers_h24=300, sellers_h24=250)
+    r = build_report(_analysis(filt, market=mk, mi=mi, holder_count=400), CFG)
+    assert r["level"] != "CRITICAL"
+    assert not any(c["status"] == "fail" and "GoPlus" in c["label"] for c in r["checks"])
+    # the disagreement is still surfaced — as data-integrity, not as a rug verdict
+    assert any(c["id"] == "jup_auth" or "consensus" in c["id"] for c in r["checks"]) or r["score"] < 90
+
+
+def test_goplus_authority_claim_kept_when_chain_agrees():
+    """When the chain itself shows a live authority, the CRITICAL path is untouched."""
+    filt = FilterResult(mint="m", passed=False, safety_score=0.0,
+                        hard_flags=["goplus_mintable", "mint_authority_active"])
+    mi = MintInfo(mint="m", mint_authority="Mxxxx", freeze_authority=None)
+    r = build_report(_analysis(filt, mi=mi), CFG)
+    assert r["level"] == "CRITICAL"
+
+
+def test_goplus_authority_claim_kept_when_chain_unreadable():
+    """No RPC read (mi None) → nothing to overrule with; the 3rd-party claim stands."""
+    filt = FilterResult(mint="m", passed=False, safety_score=0.0, hard_flags=["goplus_freezable"])
+    r = build_report(_analysis(filt, mi=None), CFG)
+    assert r["level"] == "CRITICAL"
