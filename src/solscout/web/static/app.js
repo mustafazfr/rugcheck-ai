@@ -305,7 +305,7 @@ function renderDeployer(dep) {
   const el = $("#deployerBody");
   if (!dep || !dep.wallet) { el.innerHTML = `<span class="muted-note">Creator wallet not resolvable for this token.</span>`; return; }
   const prior = dep.prior_creations;
-  const serialBad = prior != null && prior >= 4;
+  const serialBad = dep.serial === true;  // backend's call (age/source-aware) — never re-derive here
   let html = `<div class="wallet-id"><code>${short(dep.wallet)}</code>` +
     `<a href="https://solscan.io/account/${dep.wallet}" target="_blank" rel="noopener">solscan ↗</a></div>`;
   html += `<div class="kv"><span class="k">Prior tokens launched</span><span class="${serialBad ? "bad" : "good"}">${prior != null ? prior : "—"}${serialBad ? " · serial deployer ⚑" : ""}</span></div>`;

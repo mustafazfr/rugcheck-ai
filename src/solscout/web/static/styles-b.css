@@ -3,9 +3,9 @@
    taped-on suspect photo, pencil-hatched charts. Same DOM/IDs as design A — only this sheet differs. */
 
 :root{
-  --bg:#dcd1b8;            /* aged manila, dimmed (glare complaint) */
-  --bg2:#e6dcc6;
-  --panel:#f3ecdb;         /* paper sheet */
+  --bg:#d6ccba;            /* desk: warm but not yellow (owner: v2 colors were bad) */
+  --bg2:#e0d6c2;
+  --panel:#f6f1e4;         /* paper sheet (back to the clean original) */
   --panel2:#efe8d7;
   --ink:#2b2620;           /* typewriter ink */
   --muted:#6f6354;
@@ -151,18 +151,35 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 /* — verdict: the case-file cover sheet (the parchment-scroll experiment was reverted on the
    owner's review — this bordered cover with the dark CASE strip is the look he approved) — */
 .verdict-wrap{display:grid;grid-template-columns:240px 1fr;gap:30px;align-items:center;
-  /* parchment v2 (owner: "kâğıt parşömene benzesin"): same forensic structure, aged MATERIAL —
-     sepia fibre noise + warm tone falling off toward the edges + inset edge-browning. */
+  /* the SCROLL (take 3 — the owner meant the CURL itself): a clean sheet between two rolled
+     tubes. Tube ends are drawn SVG openings (rim → rolled paper → dark hole) so they read as a
+     real roll, not a flat bar; the sheet keeps the original clean paper tone (v2's browning is gone). */
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .45  0 0 0 0 .35  0 0 0 0 .2  0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23p)'/%3E%3C/svg%3E"),
-    radial-gradient(115% 90% at 50% 6%, #f6eed8 0%, #f0e4c6 52%, #e6d4ae 84%, #dcc69b 100%);
-  border:1px solid rgba(91,74,52,.6);border-radius:var(--r);
-  padding:34px 30px 30px;margin-top:26px;position:relative;
-  box-shadow:var(--shadow), inset 0 0 38px rgba(122,92,48,.16), inset 0 0 5px rgba(122,92,48,.10)}
+    radial-gradient(130% 110% at 50% 0%, #f9f4e7 0%, #f5eedd 58%, #efe5cd 100%);
+  border:0;border-left:1px solid rgba(91,74,52,.35);border-right:1px solid rgba(91,74,52,.35);
+  padding:44px 30px 42px;margin-top:34px;position:relative;
+  box-shadow:0 14px 30px -16px rgba(43,38,32,.5), 4px 6px 0 -2px rgba(43,38,32,.12)}
 .verdict-wrap::before{content:"CASE Nº SOL-" attr(data-case) " · CONFIDENTIAL — FORENSIC REPORT";
-  position:absolute;top:0;left:0;right:0;padding:6px 14px;font-family:var(--disp);font-size:10px;
-  letter-spacing:.22em;color:var(--panel);background:var(--ink);text-transform:uppercase}
-.verdict-wrap::after{content:"";position:absolute;left:14px;right:14px;top:30px;border-top:1px dashed var(--line)}
+  position:absolute;top:-21px;left:-12px;right:-12px;height:44px;z-index:2;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--disp);font-size:10px;letter-spacing:.24em;color:#655742;text-transform:uppercase;
+  text-shadow:0 1px 0 rgba(255,255,255,.55);
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 38'%3E%3Cellipse cx='13' cy='19' rx='11.5' ry='17.5' fill='%23907d60' stroke='%23594b36' stroke-width='1.5'/%3E%3Cellipse cx='13' cy='19' rx='6.2' ry='11' fill='%23554734'/%3E%3Cellipse cx='14.5' cy='17' rx='2.6' ry='5' fill='%23403525'/%3E%3C/svg%3E") left 3px center / 26px 38px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 38'%3E%3Cellipse cx='13' cy='19' rx='11.5' ry='17.5' fill='%23907d60' stroke='%23594b36' stroke-width='1.5'/%3E%3Cellipse cx='13' cy='19' rx='6.2' ry='11' fill='%23554734'/%3E%3Cellipse cx='14.5' cy='17' rx='2.6' ry='5' fill='%23403525'/%3E%3C/svg%3E") right 3px center / 26px 38px no-repeat,
+    radial-gradient(55% 130% at 50% 16%, rgba(255,255,255,.55), transparent 70%),
+    linear-gradient(180deg,#eee5cd 0%,#fbf6e9 22%,#eadfc3 56%,#cebd9b 82%,#a3906e 97%);
+  border-radius:22px;
+  box-shadow:0 7px 9px -4px rgba(43,38,32,.45), inset 0 -3px 5px rgba(43,38,32,.20), inset 0 2px 2px rgba(255,255,255,.6)}
+.verdict-wrap::after{content:"";position:absolute;bottom:-15px;left:-7px;right:-7px;height:32px;z-index:2;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 38'%3E%3Cellipse cx='13' cy='19' rx='11.5' ry='17.5' fill='%23907d60' stroke='%23594b36' stroke-width='1.5'/%3E%3Cellipse cx='13' cy='19' rx='6.2' ry='11' fill='%23554734'/%3E%3Cellipse cx='14.5' cy='17' rx='2.6' ry='5' fill='%23403525'/%3E%3C/svg%3E") left 3px center / 20px 28px no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 26 38'%3E%3Cellipse cx='13' cy='19' rx='11.5' ry='17.5' fill='%23907d60' stroke='%23594b36' stroke-width='1.5'/%3E%3Cellipse cx='13' cy='19' rx='6.2' ry='11' fill='%23554734'/%3E%3Cellipse cx='14.5' cy='17' rx='2.6' ry='5' fill='%23403525'/%3E%3C/svg%3E") right 3px center / 20px 28px no-repeat,
+    radial-gradient(55% 130% at 50% 16%, rgba(255,255,255,.5), transparent 70%),
+    linear-gradient(180deg,#eee5cd 0%,#faf5e8 24%,#e8dcc0 58%,#cbb997 84%,#9e8b69 97%);
+  border-radius:16px;
+  box-shadow:0 6px 8px -4px rgba(43,38,32,.4), inset 0 -2px 4px rgba(43,38,32,.20), inset 0 2px 2px rgba(255,255,255,.55)}
 .gauge-box{margin-top:14px}
 .gauge{width:100%;height:auto;overflow:visible}
 .g-track{fill:none;stroke:rgba(43,38,32,.14);stroke-width:13;stroke-linecap:butt;
@@ -213,10 +230,8 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 .section-head .meta{color:var(--faint);font-family:var(--mono);font-size:11px;letter-spacing:.08em}
 
 /* — checks: evidence index cards — */
-.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px}
-.cat{border:1px solid rgba(91,74,52,.5);border-radius:var(--r);overflow:hidden;
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .45  0 0 0 0 .35  0 0 0 0 .2  0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23p)'/%3E%3C/svg%3E"), radial-gradient(120% 100% at 50% 0%, #f4ecd7 0%, #eee1c2 88%, #e7d6b2 100%);
-  box-shadow:var(--shadow), inset 0 0 18px rgba(122,92,48,.09)}
+.checks{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:14px;align-items:start}
+.cat{border:1px solid var(--ink);border-radius:var(--r);background:var(--panel);overflow:hidden;box-shadow:var(--shadow)}
 .cat:nth-child(odd){transform:rotate(.25deg)} .cat:nth-child(even){transform:rotate(-.25deg)}
 .cat-h{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;
   border-bottom:1.5px solid var(--ink);background:var(--panel2);
@@ -237,10 +252,8 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 .check .det{font-size:12px;color:var(--muted);margin-top:1px;font-family:var(--mono)}
 
 /* — panels: stacked paper sheets — */
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px}
-.panel{border:1px solid rgba(91,74,52,.5);border-radius:var(--r);padding:20px;
-  background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.55' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .45  0 0 0 0 .35  0 0 0 0 .2  0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23p)'/%3E%3C/svg%3E"), radial-gradient(120% 100% at 50% 0%, #f4ecd7 0%, #eee1c2 88%, #e7d6b2 100%);
-  box-shadow:var(--shadow), inset 0 0 22px rgba(122,92,48,.10)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:18px;align-items:start}
+.panel{border:1px solid var(--ink);border-radius:var(--r);background:var(--panel);padding:20px;box-shadow:var(--shadow)}
 .cols .panel:first-child{transform:rotate(-.3deg)} .cols .panel:last-child{transform:rotate(.3deg)}
 .panel h3{font-size:12.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink);margin-bottom:14px;
   border-bottom:2px solid var(--ink);padding-bottom:7px;display:inline-block}
@@ -356,6 +369,7 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 
 @media(max-width:760px){
   .verdict-wrap{grid-template-columns:1fr;text-align:center}
+  .verdict-wrap::before{font-size:8.5px;letter-spacing:.12em}
   .gauge-box{max-width:200px;margin:14px auto 0}
   .cols{grid-template-columns:1fr}
   .links,.counts,.token-id{justify-content:center}
