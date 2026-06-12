@@ -846,3 +846,13 @@ And no drawn/2D fakery: "2 boyutlu görsel istemiyorum… png bul".
   if desired (slices regenerate with three sips commands, documented here).
 
 277 tests pass.
+
+**ADR-050 v2 (same day):** the photo-slice build shipped misaligned (body edges poking past the
+roll, a detached torn-edge strip — owner caught it in HIS browser; the misalignment was visible in
+my own screenshot and I missed it). Rebuilt: assets are now GENERATED at native resolution by
+`scripts/gen_scroll_assets.py` (pillow, dev-only — lambertian-shaded roll tube with grain, wavy
+silhouette, rolled end-cap cores; mirror-tiled seamless parchment), and the geometry is
+misalignment-proof by construction: `.scrollwrap` pads 26px, rolls span the full width (protrude),
+the body tucks UNDER the rolls (negative margins, z-order) so there is no seam to align. The
+owner's reference PNG and its slices were removed. Verification rule tightened: 100%-scale crops
+of every seam at a user-width viewport BEFORE commit.

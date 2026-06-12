@@ -120,20 +120,19 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
    side-slices; .scroll-body repeats the parchment texture vertically for any report length.
    The bottom roll is STICKY: it pins to the viewport bottom and the page unrolls from beneath
    it as you scroll — the effect the owner described ("kaydırdıkça açılıyor"). — */
-.scrollwrap{position:relative;margin-top:24px}
-.scroll-top{height:96px;border-style:solid;border-width:0 90px;
-  border-image:url("/static/scroll-top.png") 0 90 fill stretch;position:relative;z-index:3}
-.scroll-body{position:relative;z-index:1;margin-top:-2px;padding:4px 46px 22px;
-  /* photographic torn EDGES only (vertical repeat hides in a side strip); the center is flat
-     parchment matched to the asset's tone + fibre noise — full-width wrinkle tiles banded badly */
-  background:
-    url("/static/scroll-edge-l.png") left top / 46px auto repeat-y,
-    url("/static/scroll-edge-r.png") right top / 46px auto repeat-y,
-    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.5' numOctaves='3'/%3E%3CfeColorMatrix values='0 0 0 0 .42  0 0 0 0 .33  0 0 0 0 .19  0 0 0 .10 0'/%3E%3C/filter%3E%3Crect width='220' height='220' filter='url(%23p)'/%3E%3C/svg%3E") 44px 0 / 220px 220px repeat content-box,
-    linear-gradient(90deg, #e2cfa4 0%, #eddfbd 7%, #f0e3c4 50%, #eddfbd 93%, #e2cfa4 100%) 44px 0 / calc(100% - 88px) 100% no-repeat}
-.scroll-bottom{height:96px;border-style:solid;border-width:0 90px;
-  border-image:url("/static/scroll-bottom.png") 0 90 fill stretch;
-  position:sticky;bottom:-8px;z-index:4;margin-top:-4px;pointer-events:none}
+.scrollwrap{position:relative;margin-top:24px;padding:0 26px}
+.scroll-top{height:64px;margin:0 -26px;border-style:solid;border-width:0 43px;
+  border-image:url("/static/roll.png") 0 78 fill stretch;position:relative;z-index:3;
+  filter:drop-shadow(0 9px 9px rgba(43,38,32,.28))}
+.scroll-body{position:relative;z-index:1;margin-top:-30px;padding:48px 20px 34px;
+  background:url("/static/parchment.png") repeat;background-size:512px 512px;
+  box-shadow:inset 0 0 0 1px rgba(91,74,52,.25),
+    inset 18px 0 26px -18px rgba(91,74,52,.38), inset -18px 0 26px -18px rgba(91,74,52,.38),
+    0 12px 26px -14px rgba(43,38,32,.42)}
+.scroll-bottom{height:64px;margin:-30px -26px 0;border-style:solid;border-width:0 43px;
+  border-image:url("/static/roll.png") 0 78 fill stretch;
+  position:sticky;bottom:-8px;z-index:4;pointer-events:none;
+  filter:drop-shadow(0 7px 8px rgba(43,38,32,.30))}
 /* sections write ON the scroll: ink-drawn boxes instead of separate paper cards */
 .scroll-body .panel,.scroll-body .cat{background:transparent;box-shadow:none;border:1.5px solid rgba(43,38,32,.5)}
 .scroll-body .cat-h{background:rgba(43,38,32,.07)}
@@ -379,8 +378,11 @@ main{max-width:1240px;margin:0 auto;padding:0 28px 80px}
 @media(max-width:760px){
   .verdict-wrap{grid-template-columns:1fr;text-align:center}
   .verdict-wrap::before{font-size:8px;letter-spacing:.1em}
-  .scroll-top,.scroll-bottom{border-width:0 54px;height:64px}
-  .scroll-body{padding-left:30px;padding-right:30px;background-position:left top, right top, 28px 0, 28px 0;background-size:30px auto, 30px auto, 220px 220px, calc(100% - 56px) 100%}
+  .scrollwrap{padding:0 12px}
+  .scroll-top,.scroll-bottom{height:44px;border-width:0 30px}
+  .scroll-top{margin:0 -12px}
+  .scroll-bottom{margin:-22px -12px 0}
+  .scroll-body{margin-top:-22px;padding:34px 8px 24px}
   .scroll-body .section-head,.scroll-body .checks,.scroll-body .cols{padding:0 8px}
   .scroll-body .panel[id]{margin-left:8px;margin-right:8px}
   .gauge-box{max-width:200px;margin:14px auto 0}
